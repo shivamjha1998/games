@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Game Arcade</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    color: #2D3436;
+  }
+  header {
+    text-align: center;
+    padding: 40px 20px 20px;
+  }
+  header h1 {
+    font-size: clamp(2rem, 6vw, 3.5rem);
+    font-weight: 900;
+    color: #fff;
+    text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    letter-spacing: 2px;
+  }
+  header p {
+    color: rgba(255,255,255,0.8);
+    font-size: clamp(0.9rem, 2.5vw, 1.1rem);
+    margin-top: 8px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+    padding: 30px 20px 50px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.12);
+    transition: transform 0.25s, box-shadow 0.25s;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    opacity: 0;
+    transform: translateY(30px);
+    animation: fadeUp 0.5s forwards;
+  }
+  .card:hover { transform: translateY(-6px); box-shadow: 0 12px 30px rgba(0,0,0,0.2); }
+  .card:active { transform: scale(0.97); }
+  @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+  .thumb {
+    height: 140px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card-body { padding: 16px; }
+  .card-body h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 4px; }
+  .card-body p { font-size: 0.85rem; color: #636E72; line-height: 1.4; }
+  .num {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.6);
+  }
+
+  /* Thumbnail art per game */
+  .t-stack { background: linear-gradient(180deg, #74b9ff, #a29bfe); }
+  .t-stack .b { position: absolute; left: 50%; height: 18px; border-radius: 3px; transform: translateX(-50%); }
+  .t-stack .b1 { bottom: 20px; width: 100px; background: #E74C3C; }
+  .t-stack .b2 { bottom: 38px; width: 90px; background: #E67E22; }
+  .t-stack .b3 { bottom: 56px; width: 80px; background: #F1C40F; }
+  .t-stack .b4 { bottom: 74px; width: 70px; background: #2ECC71; }
+
+  .t-color { background: #2D3436; }
+  .t-color .ring {
+    width: 80px; height: 80px; border-radius: 50%;
+    background: conic-gradient(#E74C3C 0deg 90deg, #F1C40F 90deg 180deg, #2ECC71 180deg 270deg, #9B59B6 270deg 360deg);
+    animation: spin 4s linear infinite;
+    position: relative;
+  }
+  .t-color .ring::after {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 50px; height: 50px; background: #2D3436; border-radius: 50%;
+    transform: translate(-50%, -50%);
+  }
+  .t-color .dot {
+    width: 14px; height: 14px; border-radius: 50%; background: #E74C3C;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    box-shadow: 0 0 10px #E74C3C;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .t-flappy { background: linear-gradient(180deg, #74b9ff, #a29bfe); }
+  .t-flappy .pipe { position: absolute; width: 36px; background: #00B894; border-radius: 4px; }
+  .t-flappy .pt { top: 0; right: 60px; height: 45px; }
+  .t-flappy .pb { bottom: 0; right: 60px; height: 50px; }
+  .t-flappy .bird {
+    width: 24px; height: 24px; border-radius: 50%; background: #FDCB6E;
+    position: absolute; top: 55px; right: 80px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+
+  .t-zigzag { background: #2D3436; }
+  .t-zigzag .path {
+    width: 120px; height: 80px; position: relative;
+  }
+  .t-zigzag .tile {
+    width: 24px; height: 12px; background: #DFE6E9; position: absolute;
+    transform: skewX(-20deg); border-radius: 2px;
+  }
+  .t-zigzag .ball {
+    width: 12px; height: 12px; border-radius: 50%; background: #6C5CE7;
+    position: absolute; box-shadow: 0 0 8px #6C5CE7;
+  }
+
+  .t-bounce { background: linear-gradient(180deg, #0c0c1d, #1a1a3e); }
+  .t-bounce .plat { position: absolute; height: 8px; border-radius: 4px; background: #00B894; }
+  .t-bounce .p1 { bottom: 30px; left: 30px; width: 60px; }
+  .t-bounce .p2 { bottom: 60px; left: 80px; width: 50px; }
+  .t-bounce .p3 { bottom: 90px; left: 20px; width: 55px; }
+  .t-bounce .bll {
+    width: 16px; height: 16px; border-radius: 50%; background: #FD79A8;
+    position: absolute; bottom: 70px; left: 98px;
+    box-shadow: 0 0 10px #FD79A8;
+  }
+
+  .t-fruit { background: linear-gradient(180deg, #FFEAA7, #DFE6E9); }
+  .t-fruit .fr {
+    width: 30px; height: 30px; border-radius: 50%; position: absolute;
+  }
+  .t-fruit .f1 { background: #E74C3C; top: 30px; left: 40px; }
+  .t-fruit .f2 { background: #E67E22; top: 50px; left: 120px; }
+  .t-fruit .f3 { background: #2ECC71; top: 25px; left: 180px; }
+  .t-fruit .slash {
+    position: absolute; top: 20px; left: 30px;
+    width: 180px; height: 2px; background: #fff;
+    transform: rotate(-15deg);
+    box-shadow: 0 0 8px rgba(255,255,255,0.8);
+  }
+
+  .t-2048 { background: #FAF8EF; }
+  .t-2048 .mg {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    padding: 6px; background: #BBADA0; border-radius: 8px;
+  }
+  .t-2048 .tl {
+    width: 40px; height: 40px; border-radius: 6px; display: flex;
+    align-items: center; justify-content: center;
+    font-weight: 900; font-size: 0.9rem;
+  }
+
+  .t-tap { background: linear-gradient(135deg, #E74C3C, #FD79A8); }
+  .t-tap .btn {
+    width: 70px; height: 70px; border-radius: 50%;
+    background: #fff; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.8rem;
+  }
+
+  .t-snake { background: #2D3436; }
+  .t-snake .seg {
+    position: absolute; width: 14px; height: 14px; border-radius: 3px;
+  }
+  .t-snake .s1 { background: #00CEC9; top: 50px; left: 80px; }
+  .t-snake .s2 { background: #00B3B0; top: 50px; left: 64px; }
+  .t-snake .s3 { background: #0997A0; top: 50px; left: 48px; }
+  .t-snake .s4 { background: #087F8A; top: 64px; left: 48px; }
+  .t-snake .s5 { background: #076674; top: 78px; left: 48px; }
+  .t-snake .food {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #E74C3C; position: absolute; top: 50px; left: 130px;
+    box-shadow: 0 0 8px #E74C3C;
+  }
+
+  .t-runner { background: linear-gradient(180deg, #74B9FF, #A29BFE); }
+  .t-runner .ground { position: absolute; bottom: 0; width: 100%; height: 30px; background: #00B894; }
+  .t-runner .char {
+    width: 16px; height: 28px; background: #6C5CE7; border-radius: 4px;
+    position: absolute; bottom: 30px; left: 50px;
+  }
+  .t-runner .obs {
+    width: 20px; background: #E74C3C; border-radius: 3px; position: absolute; bottom: 30px;
+  }
+  .t-runner .o1 { height: 28px; left: 130px; }
+  .t-runner .o2 { height: 20px; left: 200px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GAME ARCADE</h1>
+  <p>10 Hyper-Casual Games &mdash; Tap to Play</p>
+</header>
+<div class="grid">
+  <a class="card" href="01-stack-tower.html" style="animation-delay:.05s">
+    <div class="thumb t-stack"><span class="num">01</span><div class="b b1"></div><div class="b b2"></div><div class="b b3"></div><div class="b b4"></div></div>
+    <div class="card-body"><h2>Stack Tower</h2><p>Tap to stack blocks perfectly. How high can you build?</p></div>
+  </a>
+  <a class="card" href="02-color-switch.html" style="animation-delay:.1s">
+    <div class="thumb t-color"><span class="num">02</span><div class="ring"></div><div class="dot"></div></div>
+    <div class="card-body"><h2>Color Switch</h2><p>Match your color to pass through spinning obstacles.</p></div>
+  </a>
+  <a class="card" href="03-flappy-clone.html" style="animation-delay:.15s">
+    <div class="thumb t-flappy"><span class="num">03</span><div class="pipe pt"></div><div class="pipe pb"></div><div class="bird"></div></div>
+    <div class="card-body"><h2>Flappy Clone</h2><p>Tap to flap through the gaps. Don't hit the pipes!</p></div>
+  </a>
+  <a class="card" href="04-zigzag-path.html" style="animation-delay:.2s">
+    <div class="thumb t-zigzag"><span class="num">04</span>
+      <div class="path">
+        <div class="tile" style="top:10px;left:20px"></div><div class="tile" style="top:22px;left:36px"></div>
+        <div class="tile" style="top:34px;left:52px"></div><div class="tile" style="top:46px;left:36px"></div>
+        <div class="tile" style="top:58px;left:20px"></div>
+        <div class="ball" style="top:6px;left:22px"></div>
+      </div>
+    </div>
+    <div class="card-body"><h2>Zigzag Path</h2><p>Tap to change direction. Stay on the path!</p></div>
+  </a>
+  <a class="card" href="05-ball-bounce.html" style="animation-delay:.25s">
+    <div class="thumb t-bounce"><span class="num">05</span><div class="plat p1"></div><div class="plat p2"></div><div class="plat p3"></div><div class="bll"></div></div>
+    <div class="card-body"><h2>Ball Bounce</h2><p>Bounce upward through platforms. Don't fall!</p></div>
+  </a>
+  <a class="card" href="06-fruit-slice.html" style="animation-delay:.3s">
+    <div class="thumb t-fruit"><span class="num">06</span><div class="fr f1"></div><div class="fr f2"></div><div class="fr f3"></div><div class="slash"></div></div>
+    <div class="card-body"><h2>Fruit Slice</h2><p>Swipe to slice fruits. Watch out for bombs!</p></div>
+  </a>
+  <a class="card" href="07-2048-puzzle.html" style="animation-delay:.35s">
+    <div class="thumb t-2048"><span class="num">07</span>
+      <div class="mg">
+        <div class="tl" style="background:#EDE0C8;color:#776E65">4</div>
+        <div class="tl" style="background:#F2B179;color:#fff">8</div>
+        <div class="tl" style="background:#EEE4DA;color:#776E65">2</div>
+        <div class="tl" style="background:#F59563;color:#fff">16</div>
+      </div>
+    </div>
+    <div class="card-body"><h2>2048 Puzzle</h2><p>Slide and merge tiles to reach 2048.</p></div>
+  </a>
+  <a class="card" href="08-tap-speed.html" style="animation-delay:.4s">
+    <div class="thumb t-tap"><span class="num">08</span><div class="btn">👆</div></div>
+    <div class="card-body"><h2>Tap Speed</h2><p>How fast can you tap? Test your speed!</p></div>
+  </a>
+  <a class="card" href="09-snake-game.html" style="animation-delay:.45s">
+    <div class="thumb t-snake"><span class="num">09</span><div class="seg s1"></div><div class="seg s2"></div><div class="seg s3"></div><div class="seg s4"></div><div class="seg s5"></div><div class="food"></div></div>
+    <div class="card-body"><h2>Snake</h2><p>Classic snake with a modern twist. Eat and grow!</p></div>
+  </a>
+  <a class="card" href="10-endless-runner.html" style="animation-delay:.5s">
+    <div class="thumb t-runner"><span class="num">10</span><div class="ground"></div><div class="char"></div><div class="obs o1"></div><div class="obs o2"></div></div>
+    <div class="card-body"><h2>Endless Runner</h2><p>Run, jump, and dodge obstacles. How far can you go?</p></div>
+  </a>
+</div>
+</body>
+</html>

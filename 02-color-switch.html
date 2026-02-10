@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Color Switch</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #2D3436; touch-action: manipulation; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; }
+  .home-link { position: fixed; top: 12px; left: 12px; color: rgba(255,255,255,0.6); text-decoration: none; font-family: sans-serif; font-size: 0.85rem; z-index: 10; }
+  .home-link:hover { color: #fff; }
+</style>
+</head>
+<body>
+<a class="home-link" href="index.html">&#8592; Games</a>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const W = 400, H = 700;
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  canvas.width = W; canvas.height = H;
+
+  function resize() {
+    const a = W / H;
+    let w = window.innerWidth, h = window.innerHeight;
+    if (w / h > a) w = h * a; else h = w / a;
+    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  }
+  window.addEventListener('resize', resize); resize();
+
+  const COLORS = ['#E74C3C', '#F1C40F', '#2ECC71', '#9B59B6'];
+  const COLOR_NAMES = ['red', 'yellow', 'green', 'purple'];
+  const GRAVITY = 1200;
+  const JUMP_VEL = -500;
+  const RING_THICKNESS = 16;
+
+  let state, score, bestScore, ball, obstacles, colorPickers, camY, lastTime, particles;
+  let invulnTimer; // brief invulnerability after start / color change
+
+  function init() {
+    state = 'title';
+    score = 0;
+    bestScore = parseInt(localStorage.getItem('colorswitch_best') || '0');
+    particles = [];
+    lastTime = 0;
+    camY = 0;
+    invulnTimer = 0;
+
+    ball = { x: W / 2, y: H - 200, vy: 0, colorIdx: 0 };
+    obstacles = [];
+    colorPickers = [];
+
+    // Generate initial obstacles — first one far enough to react
+    let oy = H - 500;
+    for (let i = 0; i < 8; i++) {
+      addObstacle(oy);
+      oy -= 280;
+    }
+  }
+
+  function addObstacle(y) {
+    const type = Math.random() < 0.7 ? 'ring' : 'bars';
+    const rotSpeed = (1 + Math.random() * 1.5) * (Math.random() < 0.5 ? 1 : -1);
+    obstacles.push({ x: W / 2, y, type, angle: Math.random() * Math.PI * 2, rotSpeed, scored: false, outerR: 90, innerR: 90 - RING_THICKNESS });
+
+    // Color picker between obstacles
+    colorPickers.push({ x: W / 2, y: y + 125, collected: false });
+  }
+
+  function tap() {
+    if (state === 'title') { state = 'playing'; ball.vy = JUMP_VEL; invulnTimer = 1.0; return; }
+    if (state === 'gameover') { init(); return; }
+    if (state === 'playing') {
+      ball.vy = JUMP_VEL;
+    }
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+
+    // Ball physics
+    ball.vy += GRAVITY * dt;
+    ball.y += ball.vy * dt;
+
+    // Camera follows ball
+    const targetCam = ball.y - H * 0.55;
+    if (targetCam < camY) {
+      camY += (targetCam - camY) * 0.1;
+    }
+
+    // Floor death
+    if (ball.y > camY + H + 30) { die(); return; }
+
+    // Invulnerability countdown
+    if (invulnTimer > 0) invulnTimer -= dt;
+
+    // Rotate obstacles
+    obstacles.forEach(o => { o.angle += o.rotSpeed * dt; });
+
+    // Check obstacle collisions (skip while invulnerable)
+    if (invulnTimer <= 0) {
+      const BALL_R = 12;
+      for (const o of obstacles) {
+        const dy = ball.y - o.y;
+        const dx = ball.x - o.x;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (o.type === 'ring') {
+          // Only collide when ball overlaps ring thickness
+          if (dist + BALL_R > o.innerR && dist - BALL_R < o.outerR) {
+            // Which segment is the ball in?
+            let angle = Math.atan2(dy, dx) - o.angle;
+            angle = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+            const segment = Math.floor(angle / (Math.PI / 2)) % 4;
+
+            if (segment !== ball.colorIdx) {
+              die(); return;
+            }
+          }
+
+          // Score
+          if (!o.scored && ball.y < o.y - o.outerR - 10) {
+            o.scored = true;
+            score++;
+            addScoreParticles(ball.x, ball.y);
+          }
+        } else if (o.type === 'bars') {
+          // Horizontal bars rotating around center
+          if (Math.abs(dy) < 80 && dist < 100) {
+            for (let i = 0; i < 4; i++) {
+              const barAngle = o.angle + i * Math.PI / 2;
+              const bx1 = o.x + Math.cos(barAngle) * -80;
+              const by1 = o.y + Math.sin(barAngle) * -80;
+              const bx2 = o.x + Math.cos(barAngle) * 80;
+              const by2 = o.y + Math.sin(barAngle) * 80;
+
+              const d = pointToSegDist(ball.x, ball.y, bx1, by1, bx2, by2);
+              if (d < BALL_R + 6) {
+                if (i !== ball.colorIdx) { die(); return; }
+              }
+            }
+          }
+
+          if (!o.scored && ball.y < o.y - 85) {
+            o.scored = true;
+            score++;
+            addScoreParticles(ball.x, ball.y);
+          }
+        }
+      }
+    }
+
+    // Color pickers
+    for (const cp of colorPickers) {
+      if (cp.collected) continue;
+      const dx = ball.x - cp.x;
+      const dy = ball.y - cp.y;
+      if (Math.sqrt(dx * dx + dy * dy) < 20) {
+        cp.collected = true;
+        ball.colorIdx = Math.floor(Math.random() * 4);
+        invulnTimer = 0.4; // brief grace after color change
+        // Particles
+        for (let i = 0; i < 12; i++) {
+          const a = Math.random() * Math.PI * 2;
+          particles.push({ x: cp.x, y: cp.y, vx: Math.cos(a) * 100, vy: Math.sin(a) * 100, life: 1, color: COLORS[Math.floor(Math.random() * 4)], size: 3 });
+        }
+      }
+    }
+
+    // Generate more obstacles
+    const topObs = obstacles.reduce((min, o) => Math.min(min, o.y), Infinity);
+    if (topObs > camY - 200) {
+      addObstacle(topObs - 280);
+    }
+
+    // Remove obstacles far below
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      if (obstacles[i].y > camY + H + 200) obstacles.splice(i, 1);
+    }
+    for (let i = colorPickers.length - 1; i >= 0; i--) {
+      if (colorPickers[i].y > camY + H + 200) colorPickers.splice(i, 1);
+    }
+
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.life -= dt * 2.5;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+  }
+
+  function pointToSegDist(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const cx = x1 + t * dx, cy = y1 + t * dy;
+    return Math.sqrt((px - cx) ** 2 + (py - cy) ** 2);
+  }
+
+  function addScoreParticles(x, y) {
+    for (let i = 0; i < 8; i++) {
+      const a = Math.random() * Math.PI * 2;
+      particles.push({ x, y, vx: Math.cos(a) * 80, vy: Math.sin(a) * 80, life: 1, color: COLORS[ball.colorIdx], size: 3 });
+    }
+  }
+
+  function die() {
+    state = 'gameover';
+    bestScore = Math.max(score, bestScore);
+    localStorage.setItem('colorswitch_best', bestScore);
+  }
+
+  function drawRing(o, screenY) {
+    for (let i = 0; i < 4; i++) {
+      const startAngle = o.angle + i * Math.PI / 2;
+      const endAngle = startAngle + Math.PI / 2;
+      ctx.beginPath();
+      ctx.arc(o.x, screenY, o.outerR, startAngle, endAngle);
+      ctx.arc(o.x, screenY, o.innerR, endAngle, startAngle, true);
+      ctx.closePath();
+      ctx.fillStyle = COLORS[i];
+      ctx.fill();
+    }
+  }
+
+  function drawBars(o, screenY) {
+    for (let i = 0; i < 4; i++) {
+      const barAngle = o.angle + i * Math.PI / 2;
+      const bx1 = o.x + Math.cos(barAngle) * -80;
+      const by1 = screenY + Math.sin(barAngle) * -80;
+      const bx2 = o.x + Math.cos(barAngle) * 80;
+      const by2 = screenY + Math.sin(barAngle) * 80;
+
+      ctx.strokeStyle = COLORS[i];
+      ctx.lineWidth = 12;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(bx1, by1);
+      ctx.lineTo(bx2, by2);
+      ctx.stroke();
+    }
+  }
+
+  function render() {
+    ctx.fillStyle = '#2D3436';
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    for (let y = ((-camY) % 50 + 50) % 50; y < H; y += 50) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+
+    // Obstacles
+    obstacles.forEach(o => {
+      const sy = o.y - camY;
+      if (sy < -100 || sy > H + 100) return;
+      if (o.type === 'ring') drawRing(o, sy);
+      else drawBars(o, sy);
+    });
+
+    // Color pickers
+    colorPickers.forEach(cp => {
+      if (cp.collected) return;
+      const sy = cp.y - camY;
+      if (sy < -20 || sy > H + 20) return;
+
+      const rot = Date.now() / 500;
+      ctx.save();
+      ctx.translate(cp.x, sy);
+      ctx.rotate(rot);
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = COLORS[i];
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, 12, i * Math.PI / 2, (i + 1) * Math.PI / 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    });
+
+    // Particles
+    particles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y - camY, p.size, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Ball (flashes when invulnerable)
+    const bsy = ball.y - camY;
+    const ballVisible = invulnTimer <= 0 || Math.sin(Date.now() / 60) > 0;
+    if (ballVisible) {
+      ctx.fillStyle = COLORS[ball.colorIdx];
+      ctx.shadowColor = COLORS[ball.colorIdx];
+      ctx.shadowBlur = 15;
+      ctx.beginPath(); ctx.arc(ball.x, bsy, 12, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // Inner highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath(); ctx.arc(ball.x - 3, bsy - 3, 5, 0, Math.PI * 2); ctx.fill();
+
+    // Score
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = 'bold 40px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(score, W / 2, 55);
+  }
+
+  function renderTitle() {
+    // Animate a demo ring
+    const demoAngle = Date.now() / 1000;
+    ctx.fillStyle = '#2D3436';
+    ctx.fillRect(0, 0, W, H);
+
+    // Demo ring
+    for (let i = 0; i < 4; i++) {
+      const startAngle = demoAngle + i * Math.PI / 2;
+      ctx.beginPath();
+      ctx.arc(W / 2, H * 0.45, 90, startAngle, startAngle + Math.PI / 2);
+      ctx.arc(W / 2, H * 0.45, 74, startAngle + Math.PI / 2, startAngle, true);
+      ctx.closePath();
+      ctx.fillStyle = COLORS[i];
+      ctx.fill();
+    }
+
+    // Ball in center
+    ctx.fillStyle = COLORS[0];
+    ctx.shadowColor = COLORS[0];
+    ctx.shadowBlur = 15;
+    ctx.beginPath(); ctx.arc(W / 2, H * 0.45, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 10;
+    ctx.fillText('COLOR', W / 2, H * 0.18);
+    ctx.fillText('SWITCH', W / 2, H * 0.26);
+    ctx.shadowBlur = 0;
+
+    const alpha = 0.5 + 0.5 * Math.sin(Date.now() / 500);
+    ctx.globalAlpha = alpha;
+    ctx.font = '22px Arial, sans-serif';
+    ctx.fillText('Tap to Play', W / 2, H * 0.65);
+    ctx.globalAlpha = 1;
+
+    ctx.font = '14px Arial, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText('Match your color to pass through', W / 2, H * 0.72);
+
+    if (bestScore > 0) {
+      ctx.fillStyle = '#FDCB6E';
+      ctx.font = '18px Arial, sans-serif';
+      ctx.fillText('Best: ' + bestScore, W / 2, H * 0.79);
+    }
+  }
+
+  function renderGameOver() {
+    render();
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Game Over', W / 2, H * 0.28);
+    ctx.font = 'bold 64px Arial, sans-serif';
+    ctx.fillText(score, W / 2, H * 0.42);
+    ctx.font = '20px Arial, sans-serif';
+    ctx.fillStyle = '#FDCB6E';
+    ctx.fillText('Best: ' + bestScore, W / 2, H * 0.50);
+
+    ctx.fillStyle = '#6C5CE7';
+    roundRect(W / 2 - 90, H * 0.57, 180, 50, 25);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Arial, sans-serif';
+    ctx.fillText('Play Again', W / 2, H * 0.57 + 32);
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function gameLoop(ts) {
+    const dt = Math.min((ts - lastTime) / 1000, 0.05);
+    lastTime = ts;
+    update(dt);
+    if (state === 'title') renderTitle();
+    else if (state === 'playing') render();
+    else renderGameOver();
+    requestAnimationFrame(gameLoop);
+  }
+
+  canvas.addEventListener('mousedown', tap);
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); tap(); }, { passive: false });
+  document.addEventListener('keydown', e => { if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); tap(); } });
+
+  init();
+  requestAnimationFrame(gameLoop);
+})();
+</script>
+</body>
+</html>

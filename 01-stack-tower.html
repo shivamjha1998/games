@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Stack Tower</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #2D3436; touch-action: manipulation; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; }
+  .home-link { position: fixed; top: 12px; left: 12px; color: rgba(255,255,255,0.6); text-decoration: none; font-family: sans-serif; font-size: 0.85rem; z-index: 10; }
+  .home-link:hover { color: #fff; }
+</style>
+</head>
+<body>
+<a class="home-link" href="index.html">&#8592; Games</a>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const W = 400, H = 700;
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  canvas.width = W; canvas.height = H;
+
+  function resize() {
+    const a = W / H;
+    let w = window.innerWidth, h = window.innerHeight;
+    if (w / h > a) w = h * a; else h = w / a;
+    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  }
+  window.addEventListener('resize', resize); resize();
+
+  const BLOCK_H = 28;
+  const PERFECT_THRESHOLD = 4;
+  const BASE_SPEED = 160;
+  const DEPTH = 12; // 3D depth effect
+
+  let state, score, bestScore, blocks, current, fallingPiece, cameraY, targetCamY;
+  let particles, lastTime, perfectStreak;
+
+  function hslColor(index) {
+    const h = (index * 25) % 360;
+    return { h, s: 70, l: 60 };
+  }
+
+  function hslStr(c, lOff) {
+    return `hsl(${c.h}, ${c.s}%, ${c.l + (lOff || 0)}%)`;
+  }
+
+  function init() {
+    state = 'title';
+    score = 0;
+    bestScore = parseInt(localStorage.getItem('stacktower_best') || '0');
+    perfectStreak = 0;
+    particles = [];
+    lastTime = 0;
+    cameraY = 0;
+    targetCamY = 0;
+    fallingPiece = null;
+
+    // Base block
+    blocks = [{ x: W / 2 - 100, w: 200, y: 0, color: hslColor(0) }];
+    spawnBlock();
+  }
+
+  function spawnBlock() {
+    const prev = blocks[blocks.length - 1];
+    const y = blocks.length;
+    const speed = BASE_SPEED + score * 4;
+    current = {
+      x: -prev.w,
+      w: prev.w,
+      y,
+      dir: 1,
+      speed,
+      color: hslColor(blocks.length)
+    };
+  }
+
+  function tap() {
+    if (state === 'title') { state = 'playing'; return; }
+    if (state === 'gameover') { init(); return; }
+    if (state !== 'playing') return;
+
+    const prev = blocks[blocks.length - 1];
+    const cx = current.x;
+    const cw = current.w;
+    const px = prev.x;
+    const pw = prev.w;
+
+    // Calculate overlap
+    const overlapStart = Math.max(cx, px);
+    const overlapEnd = Math.min(cx + cw, px + pw);
+    const overlapW = overlapEnd - overlapStart;
+
+    if (overlapW <= 0) {
+      // Missed completely
+      fallingPiece = { x: cx, w: cw, y: current.y, vy: 0, rotation: 0, color: current.color };
+      die();
+      return;
+    }
+
+    // Check for perfect placement
+    const isPerfect = Math.abs(overlapW - pw) < PERFECT_THRESHOLD;
+
+    if (isPerfect) {
+      perfectStreak++;
+      // Keep full width on perfect
+      blocks.push({ x: px, w: pw, y: current.y, color: current.color });
+      current.w = pw;
+      // Perfect particles
+      const bx = px + pw / 2;
+      const by = current.y;
+      for (let i = 0; i < 15; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 100 + Math.random() * 200;
+        particles.push({ x: bx, y: by * BLOCK_H, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 100, life: 1, color: '#FDCB6E', size: 3 + Math.random() * 4 });
+      }
+    } else {
+      perfectStreak = 0;
+      // Create sliced piece
+      let sliceX, sliceW;
+      if (cx < px) {
+        sliceX = cx; sliceW = px - cx;
+      } else {
+        sliceX = px + pw; sliceW = (cx + cw) - (px + pw);
+      }
+      if (sliceW > 0) {
+        fallingPiece = { x: sliceX, w: sliceW, y: current.y, vy: 0, rotation: 0, color: current.color, rotSpeed: (Math.random() - 0.5) * 5 };
+      }
+      blocks.push({ x: overlapStart, w: overlapW, y: current.y, color: current.color });
+    }
+
+    score++;
+    targetCamY = blocks.length * BLOCK_H - H * 0.6;
+    spawnBlock();
+  }
+
+  function die() {
+    state = 'gameover';
+    bestScore = Math.max(score, bestScore);
+    localStorage.setItem('stacktower_best', bestScore);
+  }
+
+  function update(dt) {
+    if (state === 'playing' && current) {
+      current.x += current.dir * current.speed * dt;
+      if (current.x + current.w > W) { current.dir = -1; current.x = W - current.w; }
+      if (current.x < 0) { current.dir = 1; current.x = 0; }
+    }
+
+    // Camera
+    cameraY += (targetCamY - cameraY) * 0.08;
+
+    // Falling piece
+    if (fallingPiece) {
+      fallingPiece.vy += 800 * dt;
+      fallingPiece.y += fallingPiece.vy * dt / BLOCK_H;
+      fallingPiece.rotation += (fallingPiece.rotSpeed || 2) * dt;
+      if (fallingPiece.y * BLOCK_H - cameraY > H + 100) fallingPiece = null;
+    }
+
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += 300 * dt;
+      p.life -= dt * 2;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+  }
+
+  function drawBlock(x, y, w, color, depth) {
+    const screenY = H - BLOCK_H - y * BLOCK_H + cameraY;
+    if (screenY > H + 40 || screenY < -60) return;
+
+    // Top face
+    ctx.fillStyle = hslStr(color, 0);
+    ctx.fillRect(x, screenY, w, BLOCK_H);
+
+    // Right face (3D)
+    if (depth) {
+      ctx.fillStyle = hslStr(color, -15);
+      ctx.beginPath();
+      ctx.moveTo(x + w, screenY);
+      ctx.lineTo(x + w + DEPTH, screenY - DEPTH);
+      ctx.lineTo(x + w + DEPTH, screenY - DEPTH + BLOCK_H);
+      ctx.lineTo(x + w, screenY + BLOCK_H);
+      ctx.closePath();
+      ctx.fill();
+
+      // Top face (3D)
+      ctx.fillStyle = hslStr(color, 10);
+      ctx.beginPath();
+      ctx.moveTo(x, screenY);
+      ctx.lineTo(x + DEPTH, screenY - DEPTH);
+      ctx.lineTo(x + w + DEPTH, screenY - DEPTH);
+      ctx.lineTo(x + w, screenY);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Subtle edge highlight
+    ctx.strokeStyle = hslStr(color, 15);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, screenY + 0.5, w - 1, BLOCK_H - 1);
+  }
+
+  function render() {
+    // Sky gradient that shifts as tower grows
+    const skyShift = Math.min(cameraY / 2000, 1);
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, lerpColor('#fddb92', '#74b9ff', skyShift));
+    grad.addColorStop(1, lerpColor('#d1fdff', '#a29bfe', skyShift));
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stacked blocks
+    blocks.forEach(b => drawBlock(b.x, b.y, b.w, b.color, true));
+
+    // Current moving block
+    if (current && state === 'playing') {
+      drawBlock(current.x, current.y, current.w, current.color, true);
+    }
+
+    // Falling piece
+    if (fallingPiece) {
+      ctx.save();
+      const fy = H - BLOCK_H - fallingPiece.y * BLOCK_H + cameraY;
+      const fcx = fallingPiece.x + fallingPiece.w / 2;
+      ctx.translate(fcx, fy + BLOCK_H / 2);
+      ctx.rotate(fallingPiece.rotation);
+      ctx.globalAlpha = Math.max(0, 1 - fallingPiece.vy / 800);
+      ctx.fillStyle = hslStr(fallingPiece.color, 0);
+      ctx.fillRect(-fallingPiece.w / 2, -BLOCK_H / 2, fallingPiece.w, BLOCK_H);
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    // Particles
+    particles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, H - p.y + cameraY, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Score
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = 'bold 40px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,0.2)';
+    ctx.shadowBlur = 6;
+    ctx.fillText(score, W / 2, 55);
+    ctx.shadowBlur = 0;
+
+    // Perfect streak text
+    if (perfectStreak >= 2 && state === 'playing') {
+      ctx.fillStyle = '#FDCB6E';
+      ctx.font = 'bold 20px Arial, sans-serif';
+      ctx.fillText('PERFECT x' + perfectStreak, W / 2, 85);
+    }
+  }
+
+  function renderTitle() {
+    // Animate camera on title
+    targetCamY = 0;
+    render();
+
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 10;
+    ctx.fillText('STACK', W / 2, H * 0.30);
+    ctx.font = 'bold 36px Arial, sans-serif';
+    ctx.fillText('TOWER', W / 2, H * 0.38);
+    ctx.shadowBlur = 0;
+
+    const alpha = 0.5 + 0.5 * Math.sin(Date.now() / 500);
+    ctx.globalAlpha = alpha;
+    ctx.font = '22px Arial, sans-serif';
+    ctx.fillText('Tap to Play', W / 2, H * 0.52);
+    ctx.globalAlpha = 1;
+
+    if (bestScore > 0) {
+      ctx.fillStyle = '#FDCB6E';
+      ctx.font = '18px Arial, sans-serif';
+      ctx.fillText('Best: ' + bestScore, W / 2, H * 0.60);
+    }
+  }
+
+  function renderGameOver() {
+    render();
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Game Over', W / 2, H * 0.28);
+    ctx.font = 'bold 64px Arial, sans-serif';
+    ctx.fillText(score, W / 2, H * 0.42);
+    ctx.font = '20px Arial, sans-serif';
+    ctx.fillStyle = '#FDCB6E';
+    ctx.fillText('Best: ' + bestScore, W / 2, H * 0.50);
+
+    ctx.fillStyle = '#6C5CE7';
+    roundRect(W / 2 - 90, H * 0.57, 180, 50, 25);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Arial, sans-serif';
+    ctx.fillText('Play Again', W / 2, H * 0.57 + 32);
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function lerpColor(a, b, t) {
+    const ar = parseInt(a.slice(1, 3), 16), ag = parseInt(a.slice(3, 5), 16), ab = parseInt(a.slice(5, 7), 16);
+    const br = parseInt(b.slice(1, 3), 16), bg = parseInt(b.slice(3, 5), 16), bb = parseInt(b.slice(5, 7), 16);
+    const rr = Math.round(ar + (br - ar) * t);
+    const rg = Math.round(ag + (bg - ag) * t);
+    const rb = Math.round(ab + (bb - ab) * t);
+    return `rgb(${rr},${rg},${rb})`;
+  }
+
+  function gameLoop(ts) {
+    const dt = Math.min((ts - lastTime) / 1000, 0.05);
+    lastTime = ts;
+    update(dt);
+    if (state === 'title') renderTitle();
+    else if (state === 'playing') render();
+    else renderGameOver();
+    requestAnimationFrame(gameLoop);
+  }
+
+  canvas.addEventListener('mousedown', tap);
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); tap(); }, { passive: false });
+  document.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); tap(); } });
+
+  init();
+  requestAnimationFrame(gameLoop);
+})();
+</script>
+</body>
+</html>

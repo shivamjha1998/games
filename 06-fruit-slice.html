@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Fruit Slice</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #2D3436; touch-action: manipulation; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; }
+  .home-link { position: fixed; top: 12px; left: 12px; color: rgba(255,255,255,0.6); text-decoration: none; font-family: sans-serif; font-size: 0.85rem; z-index: 10; }
+  .home-link:hover { color: #fff; }
+</style>
+</head>
+<body>
+<a class="home-link" href="index.html">&#8592; Games</a>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const W = 400, H = 700;
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  canvas.width = W; canvas.height = H;
+
+  function resize() {
+    const a = W / H;
+    let w = window.innerWidth, h = window.innerHeight;
+    if (w / h > a) w = h * a; else h = w / a;
+    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  }
+  window.addEventListener('resize', resize); resize();
+
+  const GRAVITY = 600;
+  const FRUIT_TYPES = [
+    { name: 'watermelon', color: '#E74C3C', inner: '#FF6B6B', r: 28, leaf: true },
+    { name: 'orange', color: '#E67E22', inner: '#F39C12', r: 24, leaf: false },
+    { name: 'apple', color: '#2ECC71', inner: '#55EFC4', r: 22, leaf: true },
+    { name: 'grape', color: '#9B59B6', inner: '#A29BFE', r: 20, leaf: false },
+    { name: 'banana', color: '#F1C40F', inner: '#FFEAA7', r: 22, leaf: false },
+  ];
+
+  let state, score, bestScore, combo, comboTimer, misses, maxMisses;
+  let fruits, halves, bombs, particles, trail, spawnTimer, lastTime;
+  let waveCount;
+
+  function init() {
+    state = 'title';
+    score = 0;
+    combo = 0;
+    comboTimer = 0;
+    misses = 0;
+    maxMisses = 3;
+    bestScore = parseInt(localStorage.getItem('fruitslice_best') || '0');
+    fruits = [];
+    halves = [];
+    bombs = [];
+    particles = [];
+    trail = [];
+    spawnTimer = 1;
+    waveCount = 0;
+    lastTime = 0;
+  }
+
+  function tap() {
+    if (state === 'title') { state = 'playing'; return; }
+    if (state === 'gameover') { init(); return; }
+  }
+
+  function spawnWave() {
+    waveCount++;
+    const count = Math.min(2 + Math.floor(waveCount / 3), 6);
+    const hasBomb = waveCount > 3 && Math.random() < 0.3;
+
+    for (let i = 0; i < count; i++) {
+      setTimeout(() => {
+        const ft = FRUIT_TYPES[Math.floor(Math.random() * FRUIT_TYPES.length)];
+        const x = 40 + Math.random() * (W - 80);
+        const vx = (W / 2 - x) * (0.3 + Math.random() * 0.5);
+        const vy = -700 - Math.random() * 300;
+        fruits.push({
+          x, y: H + 30, vx, vy,
+          rotation: Math.random() * Math.PI * 2,
+          rotSpeed: (Math.random() - 0.5) * 6,
+          type: ft, sliced: false
+        });
+      }, i * 150);
+    }
+
+    if (hasBomb) {
+      setTimeout(() => {
+        const x = 60 + Math.random() * (W - 120);
+        const vx = (W / 2 - x) * 0.4;
+        bombs.push({
+          x, y: H + 30, vx, vy: -750 - Math.random() * 200,
+          rotation: 0, rotSpeed: 3
+        });
+      }, Math.random() * count * 150);
+    }
+  }
+
+  function sliceFruit(fruit) {
+    fruit.sliced = true;
+    score++;
+    combo++;
+    comboTimer = 0.6;
+
+    // Create two halves
+    const angle = Math.random() * Math.PI;
+    for (let side = -1; side <= 1; side += 2) {
+      halves.push({
+        x: fruit.x, y: fruit.y,
+        vx: fruit.vx + Math.cos(angle + Math.PI / 2) * side * 80,
+        vy: fruit.vy - 50,
+        rotation: fruit.rotation,
+        rotSpeed: side * 5,
+        type: fruit.type, side,
+        life: 1.5
+      });
+    }
+
+    // Juice particles
+    const color = fruit.type.color;
+    for (let i = 0; i < 10; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 80 + Math.random() * 150;
+      particles.push({
+        x: fruit.x, y: fruit.y,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 50,
+        life: 1, color, size: 2 + Math.random() * 4
+      });
+    }
+  }
+
+  function hitBomb() {
+    state = 'gameover';
+    bestScore = Math.max(score, bestScore);
+    localStorage.setItem('fruitslice_best', bestScore);
+
+    // Explosion particles
+    for (let i = 0; i < 20; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 100 + Math.random() * 200;
+      particles.push({ x: W / 2, y: H / 2, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1.5, color: '#E74C3C', size: 4 + Math.random() * 6 });
+    }
+  }
+
+  // Swipe / mouse tracking
+  let swiping = false;
+  let swipePrev = null;
+
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (W / rect.width),
+      y: (e.clientY - rect.top) * (H / rect.height)
+    };
+  }
+
+  function onSwipeStart(e) {
+    if (state !== 'playing') { tap(); return; }
+    swiping = true;
+    swipePrev = getPos(e);
+    trail.push({ ...swipePrev, life: 1 });
+  }
+
+  function onSwipeMove(e) {
+    if (!swiping || state !== 'playing') return;
+    const pos = getPos(e);
+    trail.push({ ...pos, life: 1 });
+    if (trail.length > 20) trail.shift();
+
+    // Check slice against fruits
+    if (swipePrev) {
+      for (const f of fruits) {
+        if (f.sliced) continue;
+        if (circleLineIntersect(f.x, f.y, f.type.r, swipePrev.x, swipePrev.y, pos.x, pos.y)) {
+          sliceFruit(f);
+        }
+      }
+      // Check bombs
+      for (const b of bombs) {
+        if (circleLineIntersect(b.x, b.y, 24, swipePrev.x, swipePrev.y, pos.x, pos.y)) {
+          hitBomb(); return;
+        }
+      }
+    }
+    swipePrev = pos;
+  }
+
+  function onSwipeEnd() { swiping = false; swipePrev = null; }
+
+  function circleLineIntersect(cx, cy, cr, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.sqrt((cx - x1) ** 2 + (cy - y1) ** 2) < cr;
+    let t = ((cx - x1) * dx + (cy - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const nearX = x1 + t * dx, nearY = y1 + t * dy;
+    return Math.sqrt((cx - nearX) ** 2 + (cy - nearY) ** 2) < cr;
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+
+    // Spawn waves
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      spawnWave();
+      spawnTimer = Math.max(1.0, 2.2 - waveCount * 0.08);
+    }
+
+    // Update fruits
+    for (let i = fruits.length - 1; i >= 0; i--) {
+      const f = fruits[i];
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      f.vy += GRAVITY * dt;
+      f.rotation += f.rotSpeed * dt;
+
+      if (f.y > H + 50) {
+        if (!f.sliced) {
+          misses++;
+          if (misses >= maxMisses) {
+            state = 'gameover';
+            bestScore = Math.max(score, bestScore);
+            localStorage.setItem('fruitslice_best', bestScore);
+          }
+        }
+        fruits.splice(i, 1);
+      }
+    }
+
+    // Update bombs
+    for (let i = bombs.length - 1; i >= 0; i--) {
+      const b = bombs[i];
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.vy += GRAVITY * dt;
+      b.rotation += b.rotSpeed * dt;
+      if (b.y > H + 50) bombs.splice(i, 1);
+    }
+
+    // Update halves
+    for (let i = halves.length - 1; i >= 0; i--) {
+      const h = halves[i];
+      h.x += h.vx * dt;
+      h.y += h.vy * dt;
+      h.vy += GRAVITY * dt;
+      h.rotation += h.rotSpeed * dt;
+      h.life -= dt;
+      if (h.life <= 0 || h.y > H + 100) halves.splice(i, 1);
+    }
+
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += 400 * dt;
+      p.life -= dt * 2;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // Trail fade
+    for (let i = trail.length - 1; i >= 0; i--) {
+      trail[i].life -= dt * 4;
+      if (trail[i].life <= 0) trail.splice(i, 1);
+    }
+
+    // Combo timer
+    if (combo > 0) {
+      comboTimer -= dt;
+      if (comboTimer <= 0) combo = 0;
+    }
+  }
+
+  function render() {
+    // Background gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#FFEAA7');
+    grad.addColorStop(1, '#DFE6E9');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle pattern
+    ctx.fillStyle = 'rgba(0,0,0,0.02)';
+    for (let y = 0; y < H; y += 30) {
+      ctx.fillRect(0, y, W, 1);
+    }
+
+    // Trail
+    if (trail.length > 1) {
+      for (let i = 1; i < trail.length; i++) {
+        const t = trail[i];
+        const prev = trail[i - 1];
+        ctx.strokeStyle = `rgba(255,255,255,${t.life * 0.8})`;
+        ctx.lineWidth = 3 + t.life * 4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(t.x, t.y);
+        ctx.stroke();
+      }
+      // Glow
+      ctx.shadowBlur = 0;
+    }
+
+    // Fruits
+    fruits.forEach(f => {
+      if (f.sliced) return;
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.rotate(f.rotation);
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.1)';
+      ctx.beginPath(); ctx.arc(3, 3, f.type.r, 0, Math.PI * 2); ctx.fill();
+
+      // Main body
+      ctx.fillStyle = f.type.color;
+      ctx.beginPath(); ctx.arc(0, 0, f.type.r, 0, Math.PI * 2); ctx.fill();
+
+      // Highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.beginPath(); ctx.arc(-f.type.r * 0.25, -f.type.r * 0.3, f.type.r * 0.4, 0, Math.PI * 2); ctx.fill();
+
+      // Leaf
+      if (f.type.leaf) {
+        ctx.fillStyle = '#00B894';
+        ctx.beginPath();
+        ctx.ellipse(4, -f.type.r + 2, 7, 4, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        // Stem
+        ctx.strokeStyle = '#00B894';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -f.type.r + 4);
+        ctx.quadraticCurveTo(2, -f.type.r - 4, 6, -f.type.r - 2);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    });
+
+    // Bombs
+    bombs.forEach(b => {
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.rotation);
+
+      // Body
+      ctx.fillStyle = '#636E72';
+      ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 2); ctx.fill();
+
+      // Shine
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.beginPath(); ctx.arc(-6, -6, 8, 0, Math.PI * 2); ctx.fill();
+
+      // Fuse
+      ctx.strokeStyle = '#B2BEC3';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, -22);
+      ctx.quadraticCurveTo(6, -30, 10, -28);
+      ctx.stroke();
+
+      // Spark
+      const sparkAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 100);
+      ctx.fillStyle = `rgba(255, 165, 0, ${sparkAlpha})`;
+      ctx.beginPath(); ctx.arc(10, -28, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = `rgba(255, 255, 0, ${sparkAlpha * 0.7})`;
+      ctx.beginPath(); ctx.arc(10, -28, 2, 0, Math.PI * 2); ctx.fill();
+
+      // X mark
+      ctx.strokeStyle = '#E74C3C';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-8, -8); ctx.lineTo(8, 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(8, -8); ctx.lineTo(-8, 8); ctx.stroke();
+
+      ctx.restore();
+    });
+
+    // Halves
+    halves.forEach(h => {
+      ctx.save();
+      ctx.translate(h.x, h.y);
+      ctx.rotate(h.rotation);
+      ctx.globalAlpha = Math.min(1, h.life);
+
+      // Half circle
+      ctx.beginPath();
+      ctx.arc(0, 0, h.type.r, h.side > 0 ? 0 : Math.PI, h.side > 0 ? Math.PI : Math.PI * 2);
+      ctx.closePath();
+      ctx.fillStyle = h.type.color;
+      ctx.fill();
+
+      // Inner flat face
+      ctx.beginPath();
+      ctx.arc(0, 0, h.type.r * 0.85, h.side > 0 ? 0 : Math.PI, h.side > 0 ? Math.PI : Math.PI * 2);
+      ctx.closePath();
+      ctx.fillStyle = h.type.inner;
+      ctx.fill();
+
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+
+    // Particles
+    particles.forEach(p => {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // UI - Score
+    ctx.fillStyle = 'rgba(44, 62, 80, 0.8)';
+    ctx.font = 'bold 32px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(score, 20, 42);
+
+    // Combo
+    if (combo > 1) {
+      ctx.fillStyle = '#E74C3C';
+      ctx.font = 'bold 24px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      const comboScale = 1 + (combo > 3 ? 0.2 : 0);
+      ctx.save();
+      ctx.translate(W / 2, 100);
+      ctx.scale(comboScale, comboScale);
+      ctx.fillText(combo + 'x Combo!', 0, 0);
+      ctx.restore();
+    }
+
+    // Misses (lives)
+    for (let i = 0; i < maxMisses; i++) {
+      ctx.fillStyle = i < misses ? 'rgba(231,76,60,0.3)' : '#E74C3C';
+      ctx.font = '20px Arial';
+      ctx.textAlign = 'right';
+      ctx.fillText('X', W - 15 - i * 25, 38);
+    }
+  }
+
+  function renderTitle() {
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#FFEAA7');
+    grad.addColorStop(1, '#DFE6E9');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Decorative fruits
+    const time = Date.now() / 1000;
+    const demoFruits = [
+      { x: 100, y: 350 + Math.sin(time) * 20, type: FRUIT_TYPES[0], rot: time },
+      { x: 200, y: 300 + Math.sin(time + 1) * 25, type: FRUIT_TYPES[2], rot: -time * 0.8 },
+      { x: 300, y: 360 + Math.sin(time + 2) * 15, type: FRUIT_TYPES[3], rot: time * 1.2 },
+    ];
+    demoFruits.forEach(f => {
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.rotate(f.rot);
+      ctx.fillStyle = f.type.color;
+      ctx.beginPath(); ctx.arc(0, 0, f.type.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.beginPath(); ctx.arc(-5, -5, f.type.r * 0.35, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    });
+
+    // Diagonal slash
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = 'rgba(255,255,255,0.8)';
+    ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.moveTo(60, 400); ctx.lineTo(340, 280); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    ctx.fillStyle = '#2D3436';
+    ctx.font = 'bold 48px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,0.1)';
+    ctx.shadowBlur = 8;
+    ctx.fillText('FRUIT', W / 2, H * 0.16);
+    ctx.fillText('SLICE', W / 2, H * 0.24);
+    ctx.shadowBlur = 0;
+
+    const alpha = 0.5 + 0.5 * Math.sin(Date.now() / 500);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#636E72';
+    ctx.font = '22px Arial, sans-serif';
+    ctx.fillText('Tap to Play', W / 2, H * 0.68);
+    ctx.globalAlpha = 1;
+
+    ctx.font = '14px Arial, sans-serif';
+    ctx.fillStyle = 'rgba(100,100,100,0.6)';
+    ctx.fillText('Swipe to slice, avoid bombs!', W / 2, H * 0.75);
+
+    if (bestScore > 0) {
+      ctx.fillStyle = '#E74C3C';
+      ctx.font = '18px Arial, sans-serif';
+      ctx.fillText('Best: ' + bestScore, W / 2, H * 0.82);
+    }
+  }
+
+  function renderGameOver() {
+    render();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Game Over', W / 2, H * 0.28);
+    ctx.font = 'bold 64px Arial, sans-serif';
+    ctx.fillText(score, W / 2, H * 0.42);
+    ctx.font = '20px Arial, sans-serif';
+    ctx.fillStyle = '#FDCB6E';
+    ctx.fillText('Best: ' + bestScore, W / 2, H * 0.50);
+
+    ctx.fillStyle = '#E74C3C';
+    roundRect(W / 2 - 90, H * 0.57, 180, 50, 25);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Arial, sans-serif';
+    ctx.fillText('Play Again', W / 2, H * 0.57 + 32);
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function gameLoop(ts) {
+    const dt = Math.min((ts - lastTime) / 1000, 0.05);
+    lastTime = ts;
+    update(dt);
+    if (state === 'title') renderTitle();
+    else if (state === 'playing') render();
+    else renderGameOver();
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input
+  canvas.addEventListener('mousedown', e => { onSwipeStart(e); });
+  canvas.addEventListener('mousemove', e => { onSwipeMove(e); });
+  canvas.addEventListener('mouseup', () => { onSwipeEnd(); });
+  canvas.addEventListener('mouseleave', () => { onSwipeEnd(); });
+
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    onSwipeStart({ clientX: t.clientX, clientY: t.clientY });
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    onSwipeMove({ clientX: t.clientX, clientY: t.clientY });
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', e => { e.preventDefault(); onSwipeEnd(); }, { passive: false });
+
+  init();
+  requestAnimationFrame(gameLoop);
+})();
+</script>
+</body>
+</html>

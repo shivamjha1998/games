@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Zigzag Path</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #2D3436; touch-action: manipulation; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; }
+  .home-link { position: fixed; top: 12px; left: 12px; color: rgba(255,255,255,0.6); text-decoration: none; font-family: sans-serif; font-size: 0.85rem; z-index: 10; }
+  .home-link:hover { color: #fff; }
+</style>
+</head>
+<body>
+<a class="home-link" href="index.html">&#8592; Games</a>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const W = 400, H = 700;
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  canvas.width = W; canvas.height = H;
+
+  function resize() {
+    const a = W / H;
+    let w = window.innerWidth, h = window.innerHeight;
+    if (w / h > a) w = h * a; else h = w / a;
+    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+  }
+  window.addEventListener('resize', resize); resize();
+
+  const TW = 50, TH = 25;
+
+  let state, score, bestScore, lastTime, particles;
+  // Ball moves on the grid in direction: 0 = +gx (right), 1 = +gy (down)
+  let ballGx, ballGy, ballDir, ballProgress, ballSpeed;
+  let pathSet; // Set of "gx,gy" for valid tiles
+  let pathList; // ordered list for rendering
+  let camX, camY;
+
+  function isoX(gx, gy) { return (gx - gy) * TW / 2; }
+  function isoY(gx, gy) { return (gx + gy) * TH / 2; }
+
+  function init() {
+    state = 'title';
+    score = 0;
+    bestScore = parseInt(localStorage.getItem('zigzag_best') || '0');
+    particles = [];
+    lastTime = 0;
+    ballSpeed = 3.5;
+    ballProgress = 0;
+
+    // Generate path: alternating right/down segments
+    pathSet = new Set();
+    pathList = [];
+    let gx = 0, gy = 0, dir = 0;
+    for (let i = 0; i < 100; i++) {
+      const len = 2 + Math.floor(Math.random() * 4);
+      for (let j = 0; j < len; j++) {
+        const key = gx + ',' + gy;
+        if (!pathSet.has(key)) {
+          pathSet.add(key);
+          pathList.push({ gx, gy });
+        }
+        if (dir === 0) gx++; else gy++;
+      }
+      dir = 1 - dir;
+    }
+    // Add final tile
+    const fkey = gx + ',' + gy;
+    if (!pathSet.has(fkey)) { pathSet.add(fkey); pathList.push({ gx, gy }); }
+
+    // Ball starts on first tile, moving right (matching first segment)
+    ballGx = 0;
+    ballGy = 0;
+    ballDir = 0; // starts going right
+    ballProgress = 0;
+
+    const sx = isoX(ballGx, ballGy);
+    const sy = isoY(ballGx, ballGy);
+    camX = sx; camY = sy;
+  }
+
+  function tap() {
+    if (state === 'title') { state = 'playing'; return; }
+    if (state === 'gameover') { init(); return; }
+    if (state === 'playing') {
+      ballDir = 1 - ballDir; // toggle direction
+    }
+  }
+
+  function addParticles(sx, sy, color) {
+    for (let i = 0; i < 6; i++) {
+      const a = Math.random() * Math.PI * 2;
+      particles.push({ x: sx, y: sy, vx: Math.cos(a) * 80, vy: Math.sin(a) * 80 - 40, life: 1, color, size: 2 + Math.random() * 3 });
+    }
+  }
+
+  function extendPath() {
+    // Find the furthest tile and extend from there
+    const last = pathList[pathList.length - 1];
+    let gx = last.gx, gy = last.gy;
+
+    // Determine last direction by checking second-to-last tile
+    let dir;
+    if (pathList.length >= 2) {
+      const prev = pathList[pathList.length - 2];
+      dir = (last.gx > prev.gx) ? 0 : 1;
+      dir = 1 - dir; // start with the alternate
+    } else {
+      dir = 0;
+    }
+
+    for (let i = 0; i < 60; i++) {
+      const len = 2 + Math.floor(Math.random() * 4);
+      for (let j = 0; j < len; j++) {
+        if (dir === 0) gx++; else gy++;
+        const key = gx + ',' + gy;
+        if (!pathSet.has(key)) {
+          pathSet.add(key);
+          pathList.push({ gx, gy });
+        }
+      }
+      dir = 1 - dir;
+    }
+  }
+
+  function update(dt) {
+    if (state !== 'playing') return;
+
+    const currentSpeed = ballSpeed + score * 0.015;
+    ballProgress += currentSpeed * dt;
+
+    // Move ball along its chosen direction
+    while (ballProgress >= 1) {
+      ballProgress -= 1;
+
+      // Advance one tile in ballDir
+      const nextGx = ballGx + (ballDir === 0 ? 1 : 0);
+      const nextGy = ballGy + (ballDir === 1 ? 1 : 0);
+      const key = nextGx + ',' + nextGy;
+
+      if (pathSet.has(key)) {
+        // Valid move
+        ballGx = nextGx;
+        ballGy = nextGy;
+        score++;
+
+        // Trail particle
+        const offX = W / 2 - camX;
+        const offY = H * 0.4 - camY;
+        addParticles(offX + isoX(ballGx, ballGy), offY + isoY(ballGx, ballGy), '#6C5CE7');
+      } else {
+        // Walked off the path — game over
+        // Animate ball falling off
+        ballGx = nextGx;
+        ballGy = nextGy;
+        die();
+        return;
+      }
+    }
+
+    // Extend path if ball is getting close to the end
+    const lastTile = pathList[pathList.length - 1];
+    const distToEnd = Math.abs(lastTile.gx - ballGx) + Math.abs(lastTile.gy - ballGy);
+    if (distToEnd < 40) {
+      extendPath();
+    }
+
+    // Smooth camera follow
+    const targetX = isoX(ballGx, ballGy);
+    const targetY = isoY(ballGx, ballGy);
+    camX += (targetX - camX) * 0.08;
+    camY += (targetY - camY) * 0.08;
+
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.life -= dt * 2.5;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+  }
+
+  function die() {
+    state = 'gameover';
+    bestScore = Math.max(score, bestScore);
+    localStorage.setItem('zigzag_best', bestScore);
+  }
+
+  function render() {
+    ctx.fillStyle = '#2D3436';
+    ctx.fillRect(0, 0, W, H);
+
+    const offX = W / 2 - camX;
+    const offY = H * 0.4 - camY;
+
+    // Draw path tiles (only those near the ball for performance)
+    for (let i = 0; i < pathList.length; i++) {
+      const t = pathList[i];
+      const sx = offX + isoX(t.gx, t.gy);
+      const sy = offY + isoY(t.gx, t.gy);
+
+      if (sx < -TW * 2 || sx > W + TW * 2 || sy < -TH * 2 || sy > H + TH * 2) continue;
+
+      const dist = Math.abs(t.gx - ballGx) + Math.abs(t.gy - ballGy);
+      const brightness = dist < 3 ? 1 : Math.max(0.3, 1 - dist * 0.012);
+
+      ctx.save();
+      ctx.translate(sx, sy);
+
+      // Top face (diamond)
+      ctx.beginPath();
+      ctx.moveTo(0, -TH / 2);
+      ctx.lineTo(TW / 2, 0);
+      ctx.lineTo(0, TH / 2);
+      ctx.lineTo(-TW / 2, 0);
+      ctx.closePath();
+      const c = Math.floor(220 * brightness);
+      ctx.fillStyle = `rgb(${c}, ${c + 5}, ${c + 10})`;
+      ctx.fill();
+
+      // Left face (depth)
+      ctx.beginPath();
+      ctx.moveTo(-TW / 2, 0);
+      ctx.lineTo(0, TH / 2);
+      ctx.lineTo(0, TH / 2 + 8);
+      ctx.lineTo(-TW / 2, 8);
+      ctx.closePath();
+      const d = Math.floor(160 * brightness);
+      ctx.fillStyle = `rgb(${d}, ${d + 3}, ${d + 5})`;
+      ctx.fill();
+
+      // Right face (depth)
+      ctx.beginPath();
+      ctx.moveTo(TW / 2, 0);
+      ctx.lineTo(0, TH / 2);
+      ctx.lineTo(0, TH / 2 + 8);
+      ctx.lineTo(TW / 2, 8);
+      ctx.closePath();
+      const r = Math.floor(180 * brightness);
+      ctx.fillStyle = `rgb(${r}, ${r + 3}, ${r + 5})`;
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Particles
+    particles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Ball — interpolate between current tile and next position
+    const nextGx = ballGx + (ballDir === 0 ? 1 : 0) * ballProgress;
+    const nextGy = ballGy + (ballDir === 1 ? 1 : 0) * ballProgress;
+    const bsx = offX + isoX(nextGx, nextGy);
+    const bsy = offY + isoY(nextGx, nextGy);
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(bsx, bsy + 4, 10, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ball sphere
+    const grad = ctx.createRadialGradient(bsx - 3, bsy - 14, 2, bsx, bsy - 10, 12);
+    grad.addColorStop(0, '#A29BFE');
+    grad.addColorStop(1, '#6C5CE7');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(bsx, bsy - 10, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath();
+    ctx.arc(bsx - 3, bsy - 14, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Score
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 40px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(score, W / 2, 60);
+  }
+
+  function renderTitle() {
+    render();
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 10;
+    ctx.fillText('ZIGZAG', W / 2, H * 0.30);
+    ctx.font = 'bold 32px Arial, sans-serif';
+    ctx.fillText('PATH', W / 2, H * 0.37);
+    ctx.shadowBlur = 0;
+
+    const alpha = 0.5 + 0.5 * Math.sin(Date.now() / 500);
+    ctx.globalAlpha = alpha;
+    ctx.font = '22px Arial, sans-serif';
+    ctx.fillText('Tap to Play', W / 2, H * 0.50);
+    ctx.globalAlpha = 1;
+
+    ctx.font = '16px Arial, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('Tap to change direction', W / 2, H * 0.57);
+
+    if (bestScore > 0) {
+      ctx.fillStyle = '#FDCB6E';
+      ctx.font = '18px Arial, sans-serif';
+      ctx.fillText('Best: ' + bestScore, W / 2, H * 0.64);
+    }
+  }
+
+  function renderGameOver() {
+    render();
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Game Over', W / 2, H * 0.28);
+
+    ctx.font = 'bold 64px Arial, sans-serif';
+    ctx.fillText(score, W / 2, H * 0.40);
+
+    ctx.font = '20px Arial, sans-serif';
+    ctx.fillStyle = '#FDCB6E';
+    ctx.fillText('Best: ' + bestScore, W / 2, H * 0.48);
+
+    ctx.fillStyle = '#6C5CE7';
+    roundRect(W / 2 - 90, H * 0.56, 180, 50, 25);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Arial, sans-serif';
+    ctx.fillText('Play Again', W / 2, H * 0.56 + 32);
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function gameLoop(ts) {
+    const dt = Math.min((ts - lastTime) / 1000, 0.05);
+    lastTime = ts;
+    update(dt);
+    if (state === 'title') renderTitle();
+    else if (state === 'playing') render();
+    else renderGameOver();
+    requestAnimationFrame(gameLoop);
+  }
+
+  canvas.addEventListener('mousedown', tap);
+  canvas.addEventListener('touchstart', e => { e.preventDefault(); tap(); }, { passive: false });
+  document.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); tap(); } });
+
+  init();
+  requestAnimationFrame(gameLoop);
+})();
+</script>
+</body>
+</html>
