@@ -40,6 +40,17 @@
   let pathList; // ordered list for rendering
   let camX, camY;
 
+  // --- Web Audio Sound System ---
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let actx;
+  function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
+  function tone(freq, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function sweep(f1, f2, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function noise(dur, vol) { if (!actx) return; const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = buf; g.gain.setValueAtTime(vol || 0.15, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); s.connect(g); g.connect(actx.destination); s.start(); }
+  function sndStep() { tone(220 + Math.random() * 80, 0.04, 'square', 0.1); }
+  function sndTurn() { tone(500, 0.06, 'sine', 0.2); }
+  function sndGameOver() { sweep(350, 80, 0.5, 'sawtooth', 0.25); noise(0.2, 0.15); }
+
   function isoX(gx, gy) { return (gx - gy) * TW / 2; }
   function isoY(gx, gy) { return (gx + gy) * TH / 2; }
 
@@ -84,10 +95,10 @@
   }
 
   function tap() {
-    if (state === 'title') { state = 'playing'; return; }
+    if (state === 'title') { initAudio(); state = 'playing'; return; }
     if (state === 'gameover') { init(); return; }
     if (state === 'playing') {
-      ballDir = 1 - ballDir; // toggle direction
+      ballDir = 1 - ballDir; sndTurn(); // toggle direction
     }
   }
 
@@ -146,7 +157,7 @@
         // Valid move
         ballGx = nextGx;
         ballGy = nextGy;
-        score++;
+        score++; sndStep();
 
         // Trail particle
         const offX = W / 2 - camX;
@@ -157,7 +168,7 @@
         // Animate ball falling off
         ballGx = nextGx;
         ballGy = nextGy;
-        die();
+        sndGameOver(); die();
         return;
       }
     }

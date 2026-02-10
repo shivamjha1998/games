@@ -44,6 +44,18 @@
   let fruits, halves, bombs, particles, trail, spawnTimer, lastTime;
   let waveCount;
 
+  // --- Web Audio Sound System ---
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let actx;
+  function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
+  function tone(freq, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function sweep(f1, f2, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function noise(dur, vol) { if (!actx) return; const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = buf; g.gain.setValueAtTime(vol || 0.15, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); s.connect(g); g.connect(actx.destination); s.start(); }
+  function sndSlice() { noise(0.06, 0.25); sweep(800, 1200, 0.08, 'sine', 0.2); }
+  function sndBomb() { noise(0.3, 0.35); sweep(200, 50, 0.4, 'sawtooth', 0.3); }
+  function sndCombo() { tone(660, 0.08, 'sine', 0.2); setTimeout(() => tone(880, 0.08, 'sine', 0.2), 60); setTimeout(() => tone(1100, 0.1, 'sine', 0.25), 120); }
+  function sndMiss() { sweep(300, 150, 0.2, 'sine', 0.15); }
+
   function init() {
     state = 'title';
     score = 0;
@@ -63,7 +75,7 @@
   }
 
   function tap() {
-    if (state === 'title') { state = 'playing'; return; }
+    if (state === 'title') { initAudio(); state = 'playing'; return; }
     if (state === 'gameover') { init(); return; }
   }
 
@@ -104,6 +116,8 @@
     score++;
     combo++;
     comboTimer = 0.6;
+    sndSlice();
+    if (combo > 1) sndCombo();
 
     // Create two halves
     const angle = Math.random() * Math.PI;
@@ -133,6 +147,7 @@
   }
 
   function hitBomb() {
+    sndBomb();
     state = 'gameover';
     bestScore = Math.max(score, bestScore);
     localStorage.setItem('fruitslice_best', bestScore);
@@ -220,6 +235,7 @@
 
       if (f.y > H + 50) {
         if (!f.sliced) {
+          sndMiss();
           misses++;
           if (misses >= maxMisses) {
             state = 'gameover';

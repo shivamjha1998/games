@@ -43,6 +43,17 @@
 
   let state, bird, pipes, score, bestScore, groundX, lastTime, particles;
 
+  // --- Web Audio Sound System ---
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let actx;
+  function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
+  function tone(freq, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function sweep(f1, f2, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function noise(dur, vol) { if (!actx) return; const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = buf; g.gain.setValueAtTime(vol || 0.15, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); s.connect(g); g.connect(actx.destination); s.start(); }
+  function sndFlap() { sweep(300, 500, 0.08, 'sine', 0.2); }
+  function sndScore() { tone(880, 0.1, 'sine', 0.25); setTimeout(() => tone(1100, 0.1, 'sine', 0.25), 80); }
+  function sndHit() { noise(0.15, 0.3); sweep(400, 100, 0.3, 'square', 0.2); }
+
   function init() {
     state = 'title';
     bird = { y: H / 2 - 40, vy: 0, rotation: 0, wingPhase: 0 };
@@ -62,8 +73,8 @@
   }
 
   function flap() {
-    if (state === 'title') { state = 'playing'; bird.vy = FLAP; spawnPipe(); return; }
-    if (state === 'playing') { bird.vy = FLAP; bird.wingPhase = 1; }
+    if (state === 'title') { initAudio(); state = 'playing'; bird.vy = FLAP; sndFlap(); spawnPipe(); return; }
+    if (state === 'playing') { bird.vy = FLAP; bird.wingPhase = 1; sndFlap(); }
     if (state === 'gameover') { init(); }
   }
 
@@ -94,7 +105,7 @@
       p.x -= PIPE_SPEED * dt;
       if (p.x + PIPE_W < 0) { pipes.splice(i, 1); continue; }
       // Score
-      if (!p.scored && p.x + PIPE_W < BIRD_X) { p.scored = true; score++; addParticles(BIRD_X + 20, bird.y); }
+      if (!p.scored && p.x + PIPE_W < BIRD_X) { p.scored = true; score++; sndScore(); addParticles(BIRD_X + 20, bird.y); }
       // Collision
       if (BIRD_X + BIRD_R > p.x && BIRD_X - BIRD_R < p.x + PIPE_W) {
         const topPipeBottom = p.gapCenter - PIPE_GAP / 2;
@@ -117,6 +128,7 @@
   }
 
   function die() {
+    sndHit();
     state = 'gameover';
     bestScore = Math.max(score, bestScore);
     localStorage.setItem('flappy_best', bestScore);

@@ -125,6 +125,17 @@
 
   let grid, score, bestScore, won, moving;
 
+  // --- Web Audio Sound System ---
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let actx;
+  function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
+  function tone(freq, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function sweep(f1, f2, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function sndSlide() { tone(250, 0.05, 'square', 0.1); }
+  function sndMerge() { tone(520, 0.08, 'sine', 0.2); }
+  function sndBigMerge() { tone(520, 0.08, 'sine', 0.25); setTimeout(() => tone(780, 0.12, 'sine', 0.3), 70); }
+  function sndGameOver() { sweep(300, 80, 0.5, 'sawtooth', 0.2); }
+
   const COLORS = {
     2:    { bg: '#EEE4DA', fg: '#776E65' },
     4:    { bg: '#EDE0C8', fg: '#776E65' },
@@ -241,6 +252,10 @@
 
     if (!moved) return;
 
+    sndSlide();
+    if (totalMerged >= 256) sndBigMerge();
+    else if (totalMerged > 0) sndMerge();
+
     grid = newGrid;
     score += totalMerged;
     scoreEl.textContent = score;
@@ -267,6 +282,7 @@
 
       // Check game over
       if (isGameOver()) {
+        sndGameOver();
         finalScoreText.textContent = 'Score: ' + score;
         overlayOver.classList.add('active');
       }
@@ -344,6 +360,7 @@
 
   // Buttons
   document.getElementById('btn-start').addEventListener('click', () => {
+    initAudio();
     overlayTitle.classList.remove('active');
     init();
   });

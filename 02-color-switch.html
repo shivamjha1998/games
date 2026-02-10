@@ -40,6 +40,18 @@
   let state, score, bestScore, ball, obstacles, colorPickers, camY, lastTime, particles;
   let invulnTimer; // brief invulnerability after start / color change
 
+  // --- Web Audio Sound System ---
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let actx;
+  function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
+  function tone(freq, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function sweep(f1, f2, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function noise(dur, vol) { if (!actx) return; const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = buf; g.gain.setValueAtTime(vol || 0.15, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); s.connect(g); g.connect(actx.destination); s.start(); }
+  function sndJump() { sweep(350, 550, 0.1, 'sine', 0.25); }
+  function sndScore() { tone(880, 0.12, 'sine', 0.25); }
+  function sndPickup() { tone(660, 0.08, 'sine', 0.3); setTimeout(() => tone(880, 0.12, 'sine', 0.3), 70); }
+  function sndGameOver() { sweep(300, 80, 0.5, 'sawtooth', 0.2); noise(0.3, 0.15); }
+
   function init() {
     state = 'title';
     score = 0;
@@ -71,10 +83,10 @@
   }
 
   function tap() {
-    if (state === 'title') { state = 'playing'; ball.vy = JUMP_VEL; invulnTimer = 1.0; return; }
+    if (state === 'title') { initAudio(); state = 'playing'; ball.vy = JUMP_VEL; invulnTimer = 1.0; return; }
     if (state === 'gameover') { init(); return; }
     if (state === 'playing') {
-      ball.vy = JUMP_VEL;
+      ball.vy = JUMP_VEL; sndJump();
     }
   }
 
@@ -124,7 +136,7 @@
           // Score
           if (!o.scored && ball.y < o.y - o.outerR - 10) {
             o.scored = true;
-            score++;
+            score++; sndScore();
             addScoreParticles(ball.x, ball.y);
           }
         } else if (o.type === 'bars') {
@@ -146,7 +158,7 @@
 
           if (!o.scored && ball.y < o.y - 85) {
             o.scored = true;
-            score++;
+            score++; sndScore();
             addScoreParticles(ball.x, ball.y);
           }
         }
@@ -159,7 +171,7 @@
       const dx = ball.x - cp.x;
       const dy = ball.y - cp.y;
       if (Math.sqrt(dx * dx + dy * dy) < 20) {
-        cp.collected = true;
+        cp.collected = true; sndPickup();
         ball.colorIdx = Math.floor(Math.random() * 4);
         invulnTimer = 0.4; // brief grace after color change
         // Particles
@@ -211,6 +223,7 @@
   }
 
   function die() {
+    sndGameOver();
     state = 'gameover';
     bestScore = Math.max(score, bestScore);
     localStorage.setItem('colorswitch_best', bestScore);

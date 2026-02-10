@@ -39,6 +39,18 @@
   let state, score, bestScore, blocks, current, fallingPiece, cameraY, targetCamY;
   let particles, lastTime, perfectStreak;
 
+  // --- Web Audio Sound System ---
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let actx;
+  function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
+  function tone(freq, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function sweep(f1, f2, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function noise(dur, vol) { if (!actx) return; const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = buf; g.gain.setValueAtTime(vol || 0.15, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); s.connect(g); g.connect(actx.destination); s.start(); }
+  function sndPlace() { tone(800, 0.08, 'square', 0.2); }
+  function sndPerfect() { tone(523, 0.1, 'sine', 0.3); setTimeout(() => tone(659, 0.1, 'sine', 0.3), 80); setTimeout(() => tone(784, 0.15, 'sine', 0.3), 160); }
+  function sndSlice() { noise(0.08, 0.2); tone(300, 0.1, 'square', 0.15); }
+  function sndGameOver() { sweep(400, 100, 0.5, 'sawtooth', 0.25); }
+
   function hslColor(index) {
     const h = (index * 25) % 360;
     return { h, s: 70, l: 60 };
@@ -79,7 +91,7 @@
   }
 
   function tap() {
-    if (state === 'title') { state = 'playing'; return; }
+    if (state === 'title') { initAudio(); state = 'playing'; return; }
     if (state === 'gameover') { init(); return; }
     if (state !== 'playing') return;
 
@@ -97,7 +109,7 @@
     if (overlapW <= 0) {
       // Missed completely
       fallingPiece = { x: cx, w: cw, y: current.y, vy: 0, rotation: 0, color: current.color };
-      die();
+      sndGameOver(); die();
       return;
     }
 
@@ -106,6 +118,7 @@
 
     if (isPerfect) {
       perfectStreak++;
+      sndPerfect();
       // Keep full width on perfect
       blocks.push({ x: px, w: pw, y: current.y, color: current.color });
       current.w = pw;
@@ -119,6 +132,7 @@
       }
     } else {
       perfectStreak = 0;
+      sndSlice();
       // Create sliced piece
       let sliceX, sliceW;
       if (cx < px) {
