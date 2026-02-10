@@ -33,6 +33,7 @@ python3 -m http.server 8000
 - **Mobile-friendly** — touch controls, responsive scaling, no pinch-zoom
 - **Persistent high scores** — saved to localStorage per game
 - **60fps animations** — requestAnimationFrame with delta-time
+- **Sound effects** — procedural audio via Web Audio API (no external audio files)
 - **Consistent design** — shared color palette and UI patterns across all games
 
 ## Technical Details
@@ -41,6 +42,7 @@ python3 -m http.server 8000
 - Internal resolution of 400x700 (portrait), CSS-scaled to fit any screen
 - Each game follows a 3-state machine: `title` → `playing` → `gameover`
 - Touch events use `preventDefault` with `passive: false` to prevent scroll/zoom interference
+- **Sound system** — each game uses `AudioContext` with oscillator-based `tone()`, `sweep()`, and `noise()` primitives to synthesize all sound effects at runtime; `initAudio()` is called on first user gesture to comply with browser autoplay policies
 
 ## Project Structure
 
