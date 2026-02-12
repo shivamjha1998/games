@@ -25,13 +25,21 @@
   }
   .start-btn:hover, .again-btn:hover { transform: scale(1.05); box-shadow: 0 8px 25px rgba(0,0,0,0.2); }
   .start-btn:active, .again-btn:active { transform: scale(0.95); }
-
-  /* Playing screen */
   .timer { font-size: clamp(1.5rem, 5vw, 2rem); color: rgba(255,255,255,0.9); font-weight: 700; margin-bottom: 10px; }
   .timer.urgent { color: #FDCB6E; animation: pulse 0.4s ease-in-out infinite alternate; }
   @keyframes pulse { to { transform: scale(1.1); } }
   .count { font-size: clamp(3rem, 14vw, 6rem); color: #fff; font-weight: 900; text-shadow: 0 4px 20px rgba(0,0,0,0.2); margin-bottom: 5px; }
-  .tps { font-size: clamp(0.9rem, 3vw, 1.1rem); color: rgba(255,255,255,0.7); margin-bottom: 20px; }
+  .tps { font-size: clamp(0.9rem, 3vw, 1.1rem); color: rgba(255,255,255,0.7); margin-bottom: 8px; }
+  .streak-indicator {
+    font-size: clamp(0.8rem, 2.5vw, 1rem); font-weight: 700; margin-bottom: 12px;
+    padding: 4px 16px; border-radius: 20px; background: rgba(0,0,0,0.15);
+    transition: color 0.2s, box-shadow 0.2s;
+    color: rgba(255,255,255,0.5);
+  }
+  .streak-slow { color: #ff6b6b; box-shadow: 0 0 10px rgba(255,107,107,0.3); }
+  .streak-medium { color: #feca57; box-shadow: 0 0 10px rgba(254,202,87,0.3); }
+  .streak-fast { color: #00d2d3; box-shadow: 0 0 10px rgba(0,210,211,0.3); }
+  .streak-blazing { color: #1dd1a1; box-shadow: 0 0 15px rgba(29,209,161,0.5); }
   .tap-btn {
     width: clamp(140px, 40vw, 200px); height: clamp(140px, 40vw, 200px);
     border-radius: 50%; background: #fff; border: none; cursor: pointer;
@@ -46,249 +54,190 @@
     pointer-events: none;
   }
   @keyframes rippleAnim { to { transform: scale(2.5); opacity: 0; } }
-
-  /* Graph */
+  .float-text {
+    position: absolute; pointer-events: none; font-weight: 900; color: #fff;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    animation: floatUp 0.8s ease-out forwards; z-index: 100;
+    font-size: clamp(1rem, 4vw, 1.5rem);
+  }
+  @keyframes floatUp {
+    0% { opacity: 1; transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(-80px) scale(1.3); }
+  }
+  .float-milestone {
+    font-size: clamp(1.5rem, 5vw, 2rem) !important; color: #FDCB6E;
+    animation: floatMilestone 1.2s ease-out forwards;
+  }
+  @keyframes floatMilestone {
+    0% { opacity: 0; transform: translateY(0) scale(0.5); }
+    15% { opacity: 1; transform: translateY(-20px) scale(1.2); }
+    100% { opacity: 0; transform: translateY(-100px) scale(0.8); }
+  }
   .graph-wrap { width: 90%; max-width: 360px; margin-top: 15px; }
   .graph-wrap canvas { width: 100%; height: 60px; border-radius: 8px; }
-
-  /* Game Over */
   .final-count { font-size: clamp(4rem, 16vw, 7rem); color: #fff; font-weight: 900; text-shadow: 0 4px 20px rgba(0,0,0,0.2); }
   .rating { font-size: clamp(1.1rem, 4vw, 1.5rem); color: #FDCB6E; font-weight: 700; margin-top: 8px; }
   .stats { color: rgba(255,255,255,0.8); font-size: clamp(0.85rem, 2.5vw, 1rem); margin-top: 12px; line-height: 1.8; }
   .best-label { color: #FDCB6E; font-weight: 700; }
+  .new-best-text {
+    font-size: clamp(1.8rem, 7vw, 2.8rem); font-weight: 900;
+    background: linear-gradient(90deg, #f9ca24, #f0932b, #f9ca24);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: bestShine 1s ease-in-out infinite;
+    margin-bottom: 8px; text-shadow: none;
+  }
+  @keyframes bestShine { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  .screen-flash {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 200; opacity: 0; transition: opacity 0.05s;
+  }
+  .screen-flash.gold { background: radial-gradient(circle, rgba(249,202,36,0.6), rgba(240,147,43,0.3)); }
+  .screen-flash.milestone { background: radial-gradient(circle, rgba(255,255,255,0.4), transparent); }
+  .countdown-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.4); z-index: 300;
+  }
+  .countdown-overlay.active { display: flex; }
+  .countdown-num {
+    font-size: clamp(6rem, 25vw, 12rem); font-weight: 900; color: #fff;
+    text-shadow: 0 0 40px rgba(255,255,255,0.5), 0 0 80px rgba(255,255,255,0.2);
+    animation: countdownPop 0.8s ease-out forwards;
+  }
+  @keyframes countdownPop {
+    0% { transform: scale(2); opacity: 0; }
+    20% { transform: scale(1); opacity: 1; }
+    80% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(0.5); opacity: 0; }
+  }
+  .mute-btn {
+    position: fixed; top: 16px; right: 16px; z-index: 10;
+    background: none; border: none; cursor: pointer;
+    opacity: 0.6; transition: opacity 0.2s;
+    line-height: 1; padding: 4px;
+  }
+  .mute-btn:hover { opacity: 1; }
+  .mute-btn svg { display: block; }
+  #bg-particles { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+  .screen { z-index: 1; }
+  #confetti-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 250; }
+  .golden-particles { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 210; overflow: hidden; }
+  .golden-particle {
+    position: absolute; width: 6px; height: 6px; border-radius: 50%;
+    background: #f9ca24; box-shadow: 0 0 6px #f9ca24;
+    animation: goldenFall 2s ease-in forwards;
+  }
+  @keyframes goldenFall { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(200px) scale(0); } }
   .home-link { position: fixed; top: 16px; left: 16px; color: rgba(255,255,255,0.7); text-decoration: none; font-size: 0.9rem; z-index: 10; }
   .home-link:hover { color: #fff; }
 </style>
 </head>
 <body>
 <a class="home-link" href="index.html">&#8592; Games</a>
-
+<button class="mute-btn" id="mute-btn" title="Toggle sound (M)"></button>
+<canvas id="bg-particles"></canvas>
+<canvas id="confetti-canvas"></canvas>
+<div class="screen-flash" id="screen-flash"></div>
+<div class="countdown-overlay" id="countdown-overlay"><div class="countdown-num" id="countdown-num">3</div></div>
+<div class="golden-particles" id="golden-particles"></div>
 <div class="screen active" id="title-screen">
   <h1>TAP SPEED</h1>
   <p class="sub">How fast can you tap?</p>
   <button class="start-btn" id="start-btn">Start</button>
 </div>
-
 <div class="screen" id="play-screen">
   <div class="timer" id="timer">10.00</div>
   <div class="count" id="count">0</div>
   <div class="tps" id="tps">0.0 taps/sec</div>
+  <div class="streak-indicator" id="streak">-- tps</div>
   <button class="tap-btn" id="tap-btn">TAP</button>
   <div class="graph-wrap"><canvas id="graph" height="60"></canvas></div>
 </div>
-
 <div class="screen" id="over-screen">
   <h1>Time's Up!</h1>
+  <div id="new-best-container"></div>
   <div class="final-count" id="final-count">0</div>
   <div class="rating" id="rating"></div>
   <div class="stats" id="stats"></div>
   <button class="again-btn" id="again-btn">Play Again</button>
 </div>
-
 <script>
 (() => {
   const DURATION = 10;
   const LS_KEY = 'tapspeed_best';
-
-  // Elements
+  const LS_MUTE = 'tapspeed_muted';
+  let muted = localStorage.getItem(LS_MUTE) === 'true';
   const screens = { title: document.getElementById('title-screen'), play: document.getElementById('play-screen'), over: document.getElementById('over-screen') };
-  const timerEl = document.getElementById('timer');
-  const countEl = document.getElementById('count');
-  const tpsEl = document.getElementById('tps');
-  const tapBtn = document.getElementById('tap-btn');
-  const graphCanvas = document.getElementById('graph');
-  const gCtx = graphCanvas.getContext('2d');
-  const finalCountEl = document.getElementById('final-count');
-  const ratingEl = document.getElementById('rating');
-  const statsEl = document.getElementById('stats');
-
-  let taps, timestamps, startTime, elapsed, running, animId;
-  let buckets; // taps per 0.5s bucket
-
-  // --- Web Audio Sound System ---
+  const timerEl = document.getElementById('timer'), countEl = document.getElementById('count'), tpsEl = document.getElementById('tps');
+  const streakEl = document.getElementById('streak'), tapBtn = document.getElementById('tap-btn');
+  const graphCanvas = document.getElementById('graph'), gCtx = graphCanvas.getContext('2d');
+  const finalCountEl = document.getElementById('final-count'), ratingEl = document.getElementById('rating'), statsEl = document.getElementById('stats');
+  const muteBtn = document.getElementById('mute-btn'), screenFlash = document.getElementById('screen-flash');
+  const countdownOverlay = document.getElementById('countdown-overlay'), countdownNum = document.getElementById('countdown-num');
+  const newBestContainer = document.getElementById('new-best-container'), goldenParticlesEl = document.getElementById('golden-particles');
+  const bgCanvas = document.getElementById('bg-particles'), bgCtx = bgCanvas.getContext('2d');
+  const confettiCanvas = document.getElementById('confetti-canvas'), confCtx = confettiCanvas.getContext('2d');
+  let taps, timestamps, startTime, elapsed, running, animId, buckets, peakBucketValue = 0;
+  const milestones = [25, 50, 75, 100, 125, 150];
+  let milestonesHit;
+  function updateMuteUI() {
+    muteBtn.innerHTML = muted
+      ? '<svg width="24" height="20" viewBox="0 0 24 20"><polygon points="0,6 5,6 10,1 10,19 5,14 0,14" fill="#fff"/><line x1="13" y1="5" x2="20" y2="15" stroke="#ff6666" stroke-width="2.5" stroke-linecap="round"/><line x1="20" y1="5" x2="13" y2="15" stroke="#ff6666" stroke-width="2.5" stroke-linecap="round"/></svg>'
+      : '<svg width="24" height="20" viewBox="0 0 24 20"><polygon points="0,6 5,6 10,1 10,19 5,14 0,14" fill="#fff"/><path d="M13.2 6.2 A4 4 0 0 1 13.2 13.8" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/><path d="M14.5 2.4 A8 8 0 0 1 14.5 17.6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>';
+  }
+  function toggleMute() { muted = !muted; localStorage.setItem(LS_MUTE, muted); updateMuteUI(); }
+  muteBtn.addEventListener('click', toggleMute); updateMuteUI();
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   let actx;
   function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
-  function tone(freq, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
-  function sweep(f1, f2, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function tone(freq, dur, type, vol) { if (!actx || muted) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function sweep(f1, f2, dur, type, vol) { if (!actx || muted) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
   function sndTap() { tone(600, 0.04, 'square', 0.15); }
   function sndStart() { sweep(400, 800, 0.2, 'sine', 0.25); }
   function sndFinish() { tone(523, 0.1, 'sine', 0.3); setTimeout(() => tone(659, 0.1, 'sine', 0.3), 100); setTimeout(() => tone(784, 0.2, 'sine', 0.3), 200); }
-
-  function show(name) {
-    Object.values(screens).forEach(s => s.classList.remove('active'));
-    screens[name].classList.add('active');
-  }
-
-  function reset() {
-    taps = 0; timestamps = []; elapsed = 0; running = false;
-    buckets = new Array(DURATION * 2).fill(0);
-    countEl.textContent = '0';
-    tpsEl.textContent = '0.0 taps/sec';
-    timerEl.textContent = DURATION.toFixed(2);
-    timerEl.classList.remove('urgent');
-    clearGraph();
-  }
-
-  function startGame() {
-    initAudio();
-    sndStart();
-    reset();
-    show('play');
-    running = true;
-    startTime = performance.now();
-    animId = requestAnimationFrame(tick);
-  }
-
-  function tick(now) {
-    if (!running) return;
-    elapsed = (now - startTime) / 1000;
-    const remaining = Math.max(0, DURATION - elapsed);
-    timerEl.textContent = remaining.toFixed(2);
-    if (remaining < 3) timerEl.classList.add('urgent');
-    else timerEl.classList.remove('urgent');
-
-    // Rolling TPS
-    const recentCutoff = now - 2000;
-    const recent = timestamps.filter(t => t > recentCutoff);
-    const tpsVal = recent.length > 1 ? (recent.length / ((now - recent[0]) / 1000)) : 0;
-    tpsEl.textContent = tpsVal.toFixed(1) + ' taps/sec';
-
-    drawGraph();
-
-    if (remaining <= 0) { endGame(); return; }
-    animId = requestAnimationFrame(tick);
-  }
-
-  function onTap(e) {
-    if (!running) return;
-    sndTap();
-    taps++;
-    countEl.textContent = taps;
-    timestamps.push(performance.now());
-
-    // Bucket
-    const bucket = Math.min(Math.floor(elapsed * 2), buckets.length - 1);
-    if (bucket >= 0) buckets[bucket]++;
-
-    // Ripple effect
-    const rect = tapBtn.getBoundingClientRect();
-    const size = Math.max(rect.width, rect.height);
-    const ripple = document.createElement('span');
-    ripple.className = 'ripple';
-    ripple.style.width = ripple.style.height = size + 'px';
-    if (e && e.clientX) {
-      ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
-      ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
-    } else {
-      ripple.style.left = (rect.width / 2 - size / 2) + 'px';
-      ripple.style.top = (rect.height / 2 - size / 2) + 'px';
-    }
-    tapBtn.appendChild(ripple);
-    setTimeout(() => ripple.remove(), 500);
-
-    // Haptic
-    if (navigator.vibrate) navigator.vibrate(10);
-  }
-
-  function endGame() {
-    running = false;
-    cancelAnimationFrame(animId);
-    sndFinish();
-    const avgTps = taps / DURATION;
-    const best = saveBest(taps);
-
-    finalCountEl.textContent = taps;
-    ratingEl.textContent = getRating(avgTps);
-    statsEl.innerHTML = `${avgTps.toFixed(1)} taps/sec<br><span class="best-label">Best: ${best} taps</span>`;
-    show('over');
-  }
-
-  function getRating(tps) {
-    if (tps < 3) return 'Slow Turtle';
-    if (tps < 5) return 'Average Joe';
-    if (tps < 8) return 'Quick Tapper';
-    if (tps < 11) return 'Speed Demon';
-    return 'Superhuman!';
-  }
-
-  function saveBest(score) {
-    const prev = parseInt(localStorage.getItem(LS_KEY) || '0');
-    const best = Math.max(score, prev);
-    localStorage.setItem(LS_KEY, best);
-    return best;
-  }
-
-  // Graph drawing
-  function clearGraph() {
-    graphCanvas.width = graphCanvas.offsetWidth * 2;
-    graphCanvas.height = 60 * 2;
-    gCtx.scale(2, 2);
-  }
-
-  function drawGraph() {
-    const w = graphCanvas.offsetWidth;
-    const h = 60;
-    gCtx.setTransform(2, 0, 0, 2, 0, 0);
-    gCtx.clearRect(0, 0, w, h);
-
-    const maxBucket = Math.max(1, ...buckets);
-    const currentBucket = Math.min(Math.floor(elapsed * 2), buckets.length - 1);
-
-    gCtx.beginPath();
-    gCtx.moveTo(0, h);
-    for (let i = 0; i <= currentBucket; i++) {
-      const x = (i / (buckets.length - 1)) * w;
-      const y = h - (buckets[i] / maxBucket) * (h - 8);
-      if (i === 0) gCtx.lineTo(x, y);
-      else {
-        const prevX = ((i - 1) / (buckets.length - 1)) * w;
-        const prevY = h - (buckets[i - 1] / maxBucket) * (h - 8);
-        const cpx = (prevX + x) / 2;
-        gCtx.quadraticCurveTo(cpx, prevY, x, y);
-      }
-    }
-    const lastX = (currentBucket / (buckets.length - 1)) * w;
-    gCtx.lineTo(lastX, h);
-    gCtx.closePath();
-
-    const grad = gCtx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, 'rgba(255,255,255,0.4)');
-    grad.addColorStop(1, 'rgba(255,255,255,0.05)');
-    gCtx.fillStyle = grad;
-    gCtx.fill();
-
-    // Line on top
-    gCtx.beginPath();
-    for (let i = 0; i <= currentBucket; i++) {
-      const x = (i / (buckets.length - 1)) * w;
-      const y = h - (buckets[i] / maxBucket) * (h - 8);
-      if (i === 0) gCtx.moveTo(x, y);
-      else {
-        const prevX = ((i - 1) / (buckets.length - 1)) * w;
-        const prevY = h - (buckets[i - 1] / maxBucket) * (h - 8);
-        gCtx.quadraticCurveTo((prevX + x) / 2, prevY, x, y);
-      }
-    }
-    gCtx.strokeStyle = 'rgba(255,255,255,0.8)';
-    gCtx.lineWidth = 2;
-    gCtx.stroke();
-  }
-
-  // Event listeners
+  function sndCountdown() { tone(440, 0.12, 'sine', 0.2); }
+  function sndCountdownGo() { sweep(440, 880, 0.25, 'sine', 0.3); }
+  function sndMilestone() { sweep(600, 1200, 0.15, 'sine', 0.2); tone(900, 0.1, 'triangle', 0.15); }
+  function sndNewBest() { tone(523, 0.15, 'sine', 0.3); setTimeout(() => tone(659, 0.15, 'sine', 0.3), 150); setTimeout(() => tone(784, 0.15, 'sine', 0.3), 300); setTimeout(() => tone(1047, 0.3, 'sine', 0.35), 450); }
+  function flashScreenFn(type, duration) { screenFlash.className = 'screen-flash ' + type; screenFlash.style.opacity = '1'; setTimeout(() => { screenFlash.style.opacity = '0'; }, duration || 150); }
+  function spawnFloatText(text, x, y, cls) { const el = document.createElement('div'); el.className = 'float-text' + (cls ? ' ' + cls : ''); el.textContent = text; el.style.left = x + 'px'; el.style.top = y + 'px'; document.body.appendChild(el); setTimeout(() => el.remove(), cls === 'float-milestone' ? 1200 : 800); }
+  function spawnGoldenParticles(count) { goldenParticlesEl.innerHTML = ''; for (let i = 0; i < count; i++) { const p = document.createElement('div'); p.className = 'golden-particle'; p.style.left = (Math.random() * 100) + '%'; p.style.top = (Math.random() * 60 + 10) + '%'; p.style.animationDelay = (Math.random() * 0.8) + 's'; p.style.animationDuration = (1.5 + Math.random() * 1.5) + 's'; const size = 3 + Math.random() * 6; p.style.width = size + 'px'; p.style.height = size + 'px'; goldenParticlesEl.appendChild(p); } setTimeout(() => { goldenParticlesEl.innerHTML = ''; }, 3500); }
+  let bgParticles = []; const BG_PARTICLE_COUNT = 30;
+  function initBgCanvas() { bgCanvas.width = window.innerWidth; bgCanvas.height = window.innerHeight; }
+  function createBgParticle(burst) { const cx = burst ? burst.x : Math.random() * bgCanvas.width; const cy = burst ? burst.y : Math.random() * bgCanvas.height; const angle = Math.random() * Math.PI * 2; const speed = burst ? (2 + Math.random() * 4) : (0.2 + Math.random() * 0.5); return { x: cx, y: cy, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, size: 1.5 + Math.random() * 2.5, alpha: 0.15 + Math.random() * 0.25, life: burst ? (0.5 + Math.random() * 0.8) : 999, maxLife: burst ? (0.5 + Math.random() * 0.8) : 999, burst: !!burst }; }
+  function initBgParticles() { bgParticles = []; for (let i = 0; i < BG_PARTICLE_COUNT; i++) bgParticles.push(createBgParticle()); }
+  function burstBgParticles(x, y) { const count = 6 + Math.floor(Math.random() * 4); for (let i = 0; i < count; i++) bgParticles.push(createBgParticle({ x, y })); }
+  function tickBgParticles(dt) { bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height); for (let i = bgParticles.length - 1; i >= 0; i--) { const p = bgParticles[i]; p.x += p.vx; p.y += p.vy; if (p.burst) { p.life -= dt; p.vx *= 0.97; p.vy *= 0.97; if (p.life <= 0) { bgParticles.splice(i, 1); continue; } } else { if (p.x < 0) p.x = bgCanvas.width; if (p.x > bgCanvas.width) p.x = 0; if (p.y < 0) p.y = bgCanvas.height; if (p.y > bgCanvas.height) p.y = 0; } const a = p.burst ? p.alpha * (p.life / p.maxLife) : p.alpha; bgCtx.beginPath(); bgCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2); bgCtx.fillStyle = 'rgba(255,255,255,' + a + ')'; bgCtx.fill(); } }
+  let confettiParts = []; let confettiRunning = false;
+  function initConfettiCanvas() { confettiCanvas.width = window.innerWidth; confettiCanvas.height = window.innerHeight; }
+  function launchConfetti() { confettiParts = []; const colors = ['#f9ca24', '#f0932b', '#eb4d4b', '#6ab04c', '#22a6b3', '#be2edd', '#fff']; for (let i = 0; i < 120; i++) confettiParts.push({ x: Math.random() * confettiCanvas.width, y: -20 - Math.random() * confettiCanvas.height * 0.5, vx: (Math.random() - 0.5) * 4, vy: 2 + Math.random() * 3, w: 4 + Math.random() * 6, h: 6 + Math.random() * 10, color: colors[Math.floor(Math.random() * colors.length)], rot: Math.random() * Math.PI * 2, rotSpeed: (Math.random() - 0.5) * 0.2, alpha: 1 }); confettiRunning = true; }
+  function tickConfetti(dt) { if (!confettiRunning) return; confCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height); let alive = 0; for (const c of confettiParts) { c.x += c.vx; c.vy += 0.05; c.y += c.vy; c.rot += c.rotSpeed; c.vx *= 0.999; if (c.y > confettiCanvas.height + 20) { c.alpha = 0; continue; } alive++; confCtx.save(); confCtx.translate(c.x, c.y); confCtx.rotate(c.rot); confCtx.globalAlpha = c.alpha; confCtx.fillStyle = c.color; confCtx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h); confCtx.restore(); } if (alive === 0) { confettiRunning = false; confCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height); } }
+  function show(name) { Object.values(screens).forEach(s => s.classList.remove('active')); screens[name].classList.add('active'); }
+  function reset() { taps = 0; timestamps = []; elapsed = 0; running = false; buckets = new Array(DURATION * 2).fill(0); peakBucketValue = 0; milestonesHit = new Set(); countEl.textContent = '0'; tpsEl.textContent = '0.0 taps/sec'; streakEl.textContent = '-- tps'; streakEl.className = 'streak-indicator'; timerEl.textContent = DURATION.toFixed(2); timerEl.classList.remove('urgent'); newBestContainer.innerHTML = ''; clearGraph(); }
+  function runCountdown(callback) { countdownOverlay.classList.add('active'); let count = 3; function showNum() { if (count > 0) { countdownNum.textContent = count; countdownNum.style.animation = 'none'; void countdownNum.offsetWidth; countdownNum.style.animation = 'countdownPop 0.8s ease-out forwards'; sndCountdown(); count--; setTimeout(showNum, 800); } else { countdownNum.textContent = 'GO!'; countdownNum.style.animation = 'none'; void countdownNum.offsetWidth; countdownNum.style.animation = 'countdownPop 0.8s ease-out forwards'; sndCountdownGo(); setTimeout(() => { countdownOverlay.classList.remove('active'); callback(); }, 600); } } showNum(); }
+  function startGame() { initAudio(); reset(); show('play'); runCountdown(() => { running = true; startTime = performance.now(); sndStart(); lastTickTime = 0; animId = requestAnimationFrame(tick); }); }
+  let lastTickTime = 0;
+  function tick(now) { if (!running) return; const dt = lastTickTime ? (now - lastTickTime) / 1000 : 0.016; lastTickTime = now; elapsed = (now - startTime) / 1000; const remaining = Math.max(0, DURATION - elapsed); timerEl.textContent = remaining.toFixed(2); if (remaining < 3) timerEl.classList.add('urgent'); else timerEl.classList.remove('urgent'); const recentCutoff = now - 2000; const recent = timestamps.filter(t => t > recentCutoff); const tpsVal = recent.length > 1 ? (recent.length / ((now - recent[0]) / 1000)) : 0; tpsEl.textContent = tpsVal.toFixed(1) + ' taps/sec'; updateStreakIndicator(tpsVal); drawGraph(); tickBgParticles(dt); tickConfetti(dt); if (remaining <= 0) { endGame(); return; } animId = requestAnimationFrame(tick); }
+  function updateStreakIndicator(tpsVal) { let label, cls; if (tpsVal < 1) { label = '-- tps'; cls = ''; } else if (tpsVal < 4) { label = tpsVal.toFixed(1) + ' tps'; cls = 'streak-slow'; } else if (tpsVal < 7) { label = tpsVal.toFixed(1) + ' tps'; cls = 'streak-medium'; } else if (tpsVal < 10) { label = tpsVal.toFixed(1) + ' tps'; cls = 'streak-fast'; } else { label = tpsVal.toFixed(1) + ' tps'; cls = 'streak-blazing'; } streakEl.textContent = label; streakEl.className = 'streak-indicator' + (cls ? ' ' + cls : ''); }
+  function onTap(e) { if (!running) return; sndTap(); taps++; countEl.textContent = taps; timestamps.push(performance.now()); const bucket = Math.min(Math.floor(elapsed * 2), buckets.length - 1); if (bucket >= 0) { buckets[bucket]++; if (buckets[bucket] > peakBucketValue) peakBucketValue = buckets[bucket]; } const rect = tapBtn.getBoundingClientRect(); const size = Math.max(rect.width, rect.height); const ripple = document.createElement('span'); ripple.className = 'ripple'; ripple.style.width = ripple.style.height = size + 'px'; if (e && e.clientX) { ripple.style.left = (e.clientX - rect.left - size / 2) + 'px'; ripple.style.top = (e.clientY - rect.top - size / 2) + 'px'; } else { ripple.style.left = (rect.width / 2 - size / 2) + 'px'; ripple.style.top = (rect.height / 2 - size / 2) + 'px'; } tapBtn.appendChild(ripple); setTimeout(() => ripple.remove(), 500); const floatX = rect.left + rect.width / 2 + (Math.random() - 0.5) * 40 - 10; const floatY = rect.top - 10; spawnFloatText('+1', floatX, floatY); for (const m of milestones) { if (taps === m && !milestonesHit.has(m)) { milestonesHit.add(m); sndMilestone(); flashScreenFn('milestone', 120); const mx = rect.left + rect.width / 2 - 40; const my = rect.top - 60; spawnFloatText(m + ' TAPS!', mx, my, 'float-milestone'); } } const cx = e && e.clientX ? e.clientX : rect.left + rect.width / 2; const cy = e && e.clientY ? e.clientY : rect.top + rect.height / 2; burstBgParticles(cx, cy); if (navigator.vibrate) navigator.vibrate(10); }
+  function endGame() { running = false; cancelAnimationFrame(animId); sndFinish(); const avgTps = taps / DURATION; const prev = parseInt(localStorage.getItem(LS_KEY) || '0'); const isNewBest = taps > prev; const best = saveBest(taps); finalCountEl.textContent = taps; ratingEl.textContent = getRating(avgTps); newBestContainer.innerHTML = ''; if (isNewBest && taps > 0) { const nbEl = document.createElement('div'); nbEl.className = 'new-best-text'; nbEl.textContent = 'NEW BEST!'; newBestContainer.appendChild(nbEl); sndNewBest(); flashScreenFn('gold', 300); spawnGoldenParticles(50); initConfettiCanvas(); launchConfetti(); requestAnimationFrame(function confLoop() { const dt = 0.016; tickConfetti(dt); tickBgParticles(dt); if (confettiRunning) requestAnimationFrame(confLoop); }); } statsEl.innerHTML = avgTps.toFixed(1) + ' taps/sec<br><span class="best-label">Best: ' + best + ' taps</span>'; show('over'); }
+  function getRating(tps) { if (tps < 2) return 'Sleepy Sloth'; if (tps < 3) return 'Slow Turtle'; if (tps < 4) return 'Casual Clicker'; if (tps < 5) return 'Average Joe'; if (tps < 6) return 'Steady Tapper'; if (tps < 7) return 'Quick Fingers'; if (tps < 8) return 'Rapid Fire'; if (tps < 9) return 'Speed Demon'; if (tps < 10) return 'Lightning Hands'; if (tps < 11) return 'Turbo Tapper'; if (tps < 12) return 'Finger Fury'; if (tps < 14) return 'Superhuman!'; return 'Tap God'; }
+  function saveBest(score) { const prev = parseInt(localStorage.getItem(LS_KEY) || '0'); const best = Math.max(score, prev); localStorage.setItem(LS_KEY, best); return best; }
+  function clearGraph() { graphCanvas.width = graphCanvas.offsetWidth * 2; graphCanvas.height = 60 * 2; gCtx.scale(2, 2); }
+  function drawGraph() { const w = graphCanvas.offsetWidth; const h = 60; gCtx.setTransform(2, 0, 0, 2, 0, 0); gCtx.clearRect(0, 0, w, h); const maxBucket = Math.max(1, ...buckets); const currentBucket = Math.min(Math.floor(elapsed * 2), buckets.length - 1); const avgSpeed = taps / Math.max(elapsed, 0.1); let gradColor1, gradColor2; if (avgSpeed < 4) { gradColor1 = 'rgba(255,107,107,0.5)'; gradColor2 = 'rgba(255,107,107,0.05)'; } else if (avgSpeed < 7) { gradColor1 = 'rgba(254,202,87,0.5)'; gradColor2 = 'rgba(254,202,87,0.05)'; } else if (avgSpeed < 10) { gradColor1 = 'rgba(29,209,161,0.5)'; gradColor2 = 'rgba(29,209,161,0.05)'; } else { gradColor1 = 'rgba(0,210,211,0.6)'; gradColor2 = 'rgba(0,210,211,0.05)'; } let peakIdx = 0; for (let i = 0; i <= currentBucket; i++) { if (buckets[i] > buckets[peakIdx]) peakIdx = i; } gCtx.beginPath(); gCtx.moveTo(0, h); for (let i = 0; i <= currentBucket; i++) { const x = (i / (buckets.length - 1)) * w; const y = h - (buckets[i] / maxBucket) * (h - 8); if (i === 0) gCtx.lineTo(x, y); else { const prevX = ((i - 1) / (buckets.length - 1)) * w; const prevY = h - (buckets[i - 1] / maxBucket) * (h - 8); gCtx.quadraticCurveTo((prevX + x) / 2, prevY, x, y); } } const lastX = (currentBucket / (buckets.length - 1)) * w; gCtx.lineTo(lastX, h); gCtx.closePath(); const grad = gCtx.createLinearGradient(0, 0, 0, h); grad.addColorStop(0, gradColor1); grad.addColorStop(1, gradColor2); gCtx.fillStyle = grad; gCtx.fill(); if (buckets[peakIdx] > 0) { const peakX = (peakIdx / (buckets.length - 1)) * w; const peakY = h - (buckets[peakIdx] / maxBucket) * (h - 8); const glowGrad = gCtx.createRadialGradient(peakX, peakY, 0, peakX, peakY, 20); glowGrad.addColorStop(0, 'rgba(255,255,255,0.3)'); glowGrad.addColorStop(1, 'rgba(255,255,255,0)'); gCtx.fillStyle = glowGrad; gCtx.beginPath(); gCtx.arc(peakX, peakY, 20, 0, Math.PI * 2); gCtx.fill(); } gCtx.beginPath(); for (let i = 0; i <= currentBucket; i++) { const x = (i / (buckets.length - 1)) * w; const y = h - (buckets[i] / maxBucket) * (h - 8); if (i === 0) gCtx.moveTo(x, y); else { const prevX = ((i - 1) / (buckets.length - 1)) * w; const prevY = h - (buckets[i - 1] / maxBucket) * (h - 8); gCtx.quadraticCurveTo((prevX + x) / 2, prevY, x, y); } } gCtx.strokeStyle = 'rgba(255,255,255,0.9)'; gCtx.lineWidth = 2; gCtx.shadowColor = 'rgba(255,255,255,0.4)'; gCtx.shadowBlur = 6; gCtx.stroke(); gCtx.shadowBlur = 0; }
+  let bgLastTime = 0;
+  function bgLoop(now) { const dt = bgLastTime ? (now - bgLastTime) / 1000 : 0.016; bgLastTime = now; if (!running) { tickBgParticles(dt); tickConfetti(dt); } requestAnimationFrame(bgLoop); }
   tapBtn.addEventListener('mousedown', onTap);
   tapBtn.addEventListener('touchstart', e => { e.preventDefault(); onTap(e.touches[0]); }, { passive: false });
-  document.addEventListener('keydown', e => {
-    if (e.code === 'Space') { e.preventDefault(); if (running) onTap(null); }
-  });
-
+  document.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); if (running) onTap(null); } if (e.code === 'KeyM') { toggleMute(); } });
   document.getElementById('start-btn').addEventListener('click', startGame);
   document.getElementById('again-btn').addEventListener('click', () => { show('title'); });
   document.getElementById('start-btn').addEventListener('touchstart', e => { e.preventDefault(); startGame(); }, { passive: false });
   document.getElementById('again-btn').addEventListener('touchstart', e => { e.preventDefault(); show('title'); }, { passive: false });
-
-  // Init
-  clearGraph();
+  window.addEventListener('resize', () => { initBgCanvas(); initConfettiCanvas(); });
+  initBgCanvas(); initConfettiCanvas(); initBgParticles(); clearGraph(); requestAnimationFrame(bgLoop);
 })();
 </script>
 </body>

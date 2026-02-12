@@ -34,36 +34,108 @@
   const TW = 50, TH = 25;
 
   let state, score, bestScore, lastTime, particles;
-  // Ball moves on the grid in direction: 0 = +gx (right), 1 = +gy (down)
   let ballGx, ballGy, ballDir, ballProgress, ballSpeed;
-  let pathSet; // Set of "gx,gy" for valid tiles
-  let pathList; // ordered list for rendering
+  let pathSet;
+  let pathList;
   let camX, camY;
 
-  // --- Web Audio Sound System ---
+  let muted = localStorage.getItem('zigzag_muted') === 'true';
+  let paused = false;
+  let shakeMag = 0;
+  let shakeX = 0, shakeY = 0;
+  let flashColor = 'rgba(255,0,0,0.4)';
+  let flashAlpha = 0;
+  let floatingTexts = [];
+  let combo = 0;
+  let gems = [];
+  const gemSpawnChance = 0.15;
+  let newBestTriggered = false;
+  let prevBestScore = 0;
+  let lastMilestone = 0;
+
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   let actx;
   function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
-  function tone(freq, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
-  function sweep(f1, f2, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
-  function noise(dur, vol) { if (!actx) return; const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = buf; g.gain.setValueAtTime(vol || 0.15, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); s.connect(g); g.connect(actx.destination); s.start(); }
+  function tone(freq, dur, type, vol) { if (!actx || muted) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function sweep(f1, f2, dur, type, vol) { if (!actx || muted) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+  function noise(dur, vol) { if (!actx || muted) return; const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = buf; g.gain.setValueAtTime(vol || 0.15, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); s.connect(g); g.connect(actx.destination); s.start(); }
   function sndStep() { tone(220 + Math.random() * 80, 0.04, 'square', 0.1); }
   function sndTurn() { tone(500, 0.06, 'sine', 0.2); }
   function sndGameOver() { sweep(350, 80, 0.5, 'sawtooth', 0.25); noise(0.2, 0.15); }
+  function sndGem() { tone(800, 0.08, 'sine', 0.25); setTimeout(() => tone(1200, 0.12, 'sine', 0.2), 60); }
+  function sndMilestone() { tone(600, 0.1, 'sine', 0.25); setTimeout(() => tone(800, 0.1, 'sine', 0.25), 80); setTimeout(() => tone(1000, 0.15, 'sine', 0.25), 160); }
+  function sndNewBest() { tone(500, 0.1, 'sine', 0.3); setTimeout(() => tone(700, 0.1, 'sine', 0.3), 100); setTimeout(() => tone(900, 0.1, 'sine', 0.3), 200); setTimeout(() => tone(1100, 0.15, 'sine', 0.3), 300); }
 
   function isoX(gx, gy) { return (gx - gy) * TW / 2; }
   function isoY(gx, gy) { return (gx + gy) * TH / 2; }
+
+  function addFloatingText(text, x, y, color, size) {
+    floatingTexts.push({ text, x, y, color: color || '#fff', size: size || 24, vy: -60, life: 1 });
+  }
+
+  function addParticles(sx, sy, color, count) {
+    const n = count || 6;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const speed = 40 + Math.random() * 60;
+      particles.push({ x: sx, y: sy, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed - 40, life: 1, color, size: 2 + Math.random() * 3 });
+    }
+  }
+
+  function addDeathExplosion(sx, sy) {
+    const colors = ['#E74C3C', '#FF6B6B', '#FD79A8', '#FDCB6E', '#FAB1A0'];
+    for (let i = 0; i < 30; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const speed = 60 + Math.random() * 120;
+      particles.push({ x: sx, y: sy, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed - 60, life: 1, color: colors[Math.floor(Math.random() * colors.length)], size: 2 + Math.random() * 5 });
+    }
+  }
+
+  function addGoldenParticles(sx, sy, count) {
+    const colors = ['#FDCB6E', '#F9CA24', '#FFD700', '#FFC312'];
+    for (let i = 0; i < (count || 20); i++) {
+      const a = Math.random() * Math.PI * 2;
+      const speed = 50 + Math.random() * 100;
+      particles.push({ x: sx, y: sy, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed - 50, life: 1, color: colors[Math.floor(Math.random() * colors.length)], size: 2 + Math.random() * 4 });
+    }
+  }
+
+  function addColorfulParticles(sx, sy, count) {
+    const colors = ['#6C5CE7', '#00CEC9', '#FD79A8', '#FDCB6E', '#55EFC4', '#FF7675', '#74B9FF'];
+    for (let i = 0; i < (count || 25); i++) {
+      const a = Math.random() * Math.PI * 2;
+      const speed = 50 + Math.random() * 100;
+      particles.push({ x: sx, y: sy, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed - 50, life: 1, color: colors[Math.floor(Math.random() * colors.length)], size: 2 + Math.random() * 4 });
+    }
+  }
+
+  function spawnGemsOnPath(startIdx) {
+    const start = startIdx || 5;
+    for (let i = start; i < pathList.length; i++) {
+      if (Math.random() < gemSpawnChance) {
+        gems.push({ gx: pathList[i].gx, gy: pathList[i].gy, collected: false, bob: Math.random() * Math.PI * 2 });
+      }
+    }
+  }
 
   function init() {
     state = 'title';
     score = 0;
     bestScore = parseInt(localStorage.getItem('zigzag_best') || '0');
+    prevBestScore = bestScore;
+    newBestTriggered = false;
+    lastMilestone = 0;
+    combo = 0;
     particles = [];
+    floatingTexts = [];
+    gems = [];
     lastTime = 0;
     ballSpeed = 3.5;
     ballProgress = 0;
+    shakeMag = 0; shakeX = 0; shakeY = 0;
+    flashAlpha = 0;
+    paused = false;
 
-    // Generate path: alternating right/down segments
     pathSet = new Set();
     pathList = [];
     let gx = 0, gy = 0, dir = 0;
@@ -79,47 +151,40 @@
       }
       dir = 1 - dir;
     }
-    // Add final tile
     const fkey = gx + ',' + gy;
     if (!pathSet.has(fkey)) { pathSet.add(fkey); pathList.push({ gx, gy }); }
 
-    // Ball starts on first tile, moving right (matching first segment)
     ballGx = 0;
     ballGy = 0;
-    ballDir = 0; // starts going right
+    ballDir = 0;
     ballProgress = 0;
 
     const sx = isoX(ballGx, ballGy);
     const sy = isoY(ballGx, ballGy);
     camX = sx; camY = sy;
+
+    spawnGemsOnPath(5);
   }
 
   function tap() {
     if (state === 'title') { initAudio(); state = 'playing'; return; }
     if (state === 'gameover') { init(); return; }
-    if (state === 'playing') {
-      ballDir = 1 - ballDir; sndTurn(); // toggle direction
-    }
-  }
-
-  function addParticles(sx, sy, color) {
-    for (let i = 0; i < 6; i++) {
-      const a = Math.random() * Math.PI * 2;
-      particles.push({ x: sx, y: sy, vx: Math.cos(a) * 80, vy: Math.sin(a) * 80 - 40, life: 1, color, size: 2 + Math.random() * 3 });
+    if (state === 'playing' && !paused) {
+      ballDir = 1 - ballDir; sndTurn();
+      combo = 0;
     }
   }
 
   function extendPath() {
-    // Find the furthest tile and extend from there
+    const prevLen = pathList.length;
     const last = pathList[pathList.length - 1];
     let gx = last.gx, gy = last.gy;
 
-    // Determine last direction by checking second-to-last tile
     let dir;
     if (pathList.length >= 2) {
       const prev = pathList[pathList.length - 2];
       dir = (last.gx > prev.gx) ? 0 : 1;
-      dir = 1 - dir; // start with the alternate
+      dir = 1 - dir;
     } else {
       dir = 0;
     }
@@ -136,36 +201,108 @@
       }
       dir = 1 - dir;
     }
+
+    spawnGemsOnPath(prevLen);
   }
 
   function update(dt) {
-    if (state !== 'playing') return;
+    if (shakeMag > 0.5) {
+      shakeX = (Math.random() - 0.5) * shakeMag * 2;
+      shakeY = (Math.random() - 0.5) * shakeMag * 2;
+      shakeMag *= 0.85;
+    } else {
+      shakeMag = 0; shakeX = 0; shakeY = 0;
+    }
+
+    if (flashAlpha > 0.01) {
+      flashAlpha *= 0.9;
+    } else {
+      flashAlpha = 0;
+    }
+
+    for (let i = floatingTexts.length - 1; i >= 0; i--) {
+      const ft = floatingTexts[i];
+      ft.y += ft.vy * dt;
+      ft.life -= dt * 1.2;
+      if (ft.life <= 0) floatingTexts.splice(i, 1);
+    }
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += 80 * dt;
+      p.life -= dt * 2.5;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    if (state !== 'playing' || paused) return;
 
     const currentSpeed = ballSpeed + score * 0.015;
     ballProgress += currentSpeed * dt;
 
-    // Move ball along its chosen direction
     while (ballProgress >= 1) {
       ballProgress -= 1;
 
-      // Advance one tile in ballDir
       const nextGx = ballGx + (ballDir === 0 ? 1 : 0);
       const nextGy = ballGy + (ballDir === 1 ? 1 : 0);
       const key = nextGx + ',' + nextGy;
 
       if (pathSet.has(key)) {
-        // Valid move
         ballGx = nextGx;
         ballGy = nextGy;
-        score++; sndStep();
+        score++; combo++; sndStep();
 
-        // Trail particle
         const offX = W / 2 - camX;
         const offY = H * 0.4 - camY;
-        addParticles(offX + isoX(ballGx, ballGy), offY + isoY(ballGx, ballGy), '#6C5CE7');
+        const px = offX + isoX(ballGx, ballGy);
+        const py = offY + isoY(ballGx, ballGy);
+        addParticles(px, py, '#6C5CE7', 4);
+        if (Math.random() < 0.4) {
+          addParticles(px, py, '#A29BFE', 2);
+        }
+
+        addFloatingText('+1', px, py - 20, '#fff', 18);
+
+        if (combo > 0 && combo % 5 === 0) {
+          addFloatingText('COMBO x' + combo + '!', px, py - 40, '#55EFC4', 22);
+          addParticles(px, py, '#55EFC4', 8);
+        }
+        if (combo === 10) {
+          addFloatingText('PERFECT!', px, py - 55, '#FDCB6E', 28);
+          addGoldenParticles(px, py, 12);
+        }
+
+        for (let g = gems.length - 1; g >= 0; g--) {
+          const gem = gems[g];
+          if (!gem.collected && gem.gx === ballGx && gem.gy === ballGy) {
+            gem.collected = true;
+            score += 4;
+            sndGem();
+            addFloatingText('+5 GEM!', px, py - 35, '#00CEC9', 26);
+            addParticles(px, py, '#00CEC9', 12);
+            addParticles(px, py, '#81ECEC', 6);
+          }
+        }
+
+        const currentMilestone = Math.floor(score / 25);
+        if (currentMilestone > lastMilestone) {
+          lastMilestone = currentMilestone;
+          addFloatingText('MILESTONE!', W / 2, H * 0.3, '#FD79A8', 32);
+          addColorfulParticles(W / 2, H * 0.35, 30);
+          sndMilestone();
+          flashColor = 'rgba(253,203,110,0.3)';
+          flashAlpha = 0.3;
+        }
+
+        if (!newBestTriggered && prevBestScore > 0 && score > prevBestScore) {
+          newBestTriggered = true;
+          addFloatingText('NEW BEST!', W / 2, H * 0.25, '#FFD700', 36);
+          addGoldenParticles(W / 2, H * 0.3, 35);
+          sndNewBest();
+          flashColor = 'rgba(255,215,0,0.35)';
+          flashAlpha = 0.35;
+        }
       } else {
-        // Walked off the path — game over
-        // Animate ball falling off
         ballGx = nextGx;
         ballGy = nextGy;
         sndGameOver(); die();
@@ -173,25 +310,19 @@
       }
     }
 
-    // Extend path if ball is getting close to the end
     const lastTile = pathList[pathList.length - 1];
     const distToEnd = Math.abs(lastTile.gx - ballGx) + Math.abs(lastTile.gy - ballGy);
     if (distToEnd < 40) {
       extendPath();
     }
 
-    // Smooth camera follow
     const targetX = isoX(ballGx, ballGy);
     const targetY = isoY(ballGx, ballGy);
     camX += (targetX - camX) * 0.08;
     camY += (targetY - camY) * 0.08;
 
-    // Particles
-    for (let i = particles.length - 1; i >= 0; i--) {
-      const p = particles[i];
-      p.x += p.vx * dt; p.y += p.vy * dt;
-      p.life -= dt * 2.5;
-      if (p.life <= 0) particles.splice(i, 1);
+    for (const gem of gems) {
+      gem.bob += dt * 3;
     }
   }
 
@@ -199,16 +330,67 @@
     state = 'gameover';
     bestScore = Math.max(score, bestScore);
     localStorage.setItem('zigzag_best', bestScore);
+    shakeMag = 15;
+    flashColor = 'rgba(231,76,60,0.4)';
+    flashAlpha = 0.4;
+
+    const offX = W / 2 - camX;
+    const offY = H * 0.4 - camY;
+    const bx = offX + isoX(ballGx, ballGy);
+    const by = offY + isoY(ballGx, ballGy);
+    addDeathExplosion(bx, by);
+  }
+
+  function drawMuteIcon(x, y) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - 8, y - 4); ctx.lineTo(x - 3, y - 4);
+    ctx.lineTo(x + 3, y - 9); ctx.lineTo(x + 3, y + 9);
+    ctx.lineTo(x - 3, y + 4); ctx.lineTo(x - 8, y + 4);
+    ctx.closePath(); ctx.stroke();
+    if (muted) {
+      ctx.beginPath();
+      ctx.moveTo(x + 7, y - 5); ctx.lineTo(x + 13, y + 5);
+      ctx.moveTo(x + 13, y - 5); ctx.lineTo(x + 7, y + 5);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(x + 5, y, 6, -Math.PI * 0.4, Math.PI * 0.4);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x + 5, y, 11, -Math.PI * 0.4, Math.PI * 0.4);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  const muteIconX = W - 30, muteIconY = 25;
+
+  function isInMuteButton(cx, cy) {
+    return Math.abs(cx - muteIconX) < 20 && Math.abs(cy - muteIconY) < 20;
+  }
+
+  function toggleMute() {
+    muted = !muted;
+    localStorage.setItem('zigzag_muted', muted.toString());
   }
 
   function render() {
+    ctx.save();
+
+    if (shakeMag > 0) {
+      ctx.translate(shakeX, shakeY);
+    }
+
     ctx.fillStyle = '#2D3436';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(-10, -10, W + 20, H + 20);
 
     const offX = W / 2 - camX;
     const offY = H * 0.4 - camY;
 
-    // Draw path tiles (only those near the ball for performance)
     for (let i = 0; i < pathList.length; i++) {
       const t = pathList[i];
       const sx = offX + isoX(t.gx, t.gy);
@@ -222,7 +404,6 @@
       ctx.save();
       ctx.translate(sx, sy);
 
-      // Top face (diamond)
       ctx.beginPath();
       ctx.moveTo(0, -TH / 2);
       ctx.lineTo(TW / 2, 0);
@@ -233,7 +414,6 @@
       ctx.fillStyle = `rgb(${c}, ${c + 5}, ${c + 10})`;
       ctx.fill();
 
-      // Left face (depth)
       ctx.beginPath();
       ctx.moveTo(-TW / 2, 0);
       ctx.lineTo(0, TH / 2);
@@ -244,7 +424,6 @@
       ctx.fillStyle = `rgb(${d}, ${d + 3}, ${d + 5})`;
       ctx.fill();
 
-      // Right face (depth)
       ctx.beginPath();
       ctx.moveTo(TW / 2, 0);
       ctx.lineTo(0, TH / 2);
@@ -258,46 +437,112 @@
       ctx.restore();
     }
 
-    // Particles
-    particles.forEach(p => {
-      ctx.globalAlpha = p.life;
+    for (let gi = 0; gi < gems.length; gi++) {
+      const gem = gems[gi];
+      if (gem.collected) continue;
+      const gsx = offX + isoX(gem.gx, gem.gy);
+      const gsy = offY + isoY(gem.gx, gem.gy);
+      if (gsx < -TW * 2 || gsx > W + TW * 2 || gsy < -TH * 2 || gsy > H + TH * 2) continue;
+
+      const bobOff = Math.sin(gem.bob) * 3;
+      const gemY = gsy - 14 + bobOff;
+
+      ctx.save();
+      ctx.globalAlpha = 0.3 + Math.sin(gem.bob) * 0.1;
+      ctx.fillStyle = '#00CEC9';
+      ctx.beginPath();
+      ctx.arc(gsx, gemY, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = '#00CEC9';
+      ctx.beginPath();
+      ctx.moveTo(gsx, gemY - 7);
+      ctx.lineTo(gsx + 5, gemY);
+      ctx.lineTo(gsx, gemY + 7);
+      ctx.lineTo(gsx - 5, gemY);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.beginPath();
+      ctx.moveTo(gsx, gemY - 7);
+      ctx.lineTo(gsx + 5, gemY);
+      ctx.lineTo(gsx, gemY - 1);
+      ctx.lineTo(gsx - 5, gemY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    for (let pi = 0; pi < particles.length; pi++) {
+      const p = particles[pi];
+      ctx.globalAlpha = Math.max(0, p.life);
       ctx.fillStyle = p.color;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
-    });
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2); ctx.fill();
+    }
     ctx.globalAlpha = 1;
 
-    // Ball — interpolate between current tile and next position
     const nextGx = ballGx + (ballDir === 0 ? 1 : 0) * ballProgress;
     const nextGy = ballGy + (ballDir === 1 ? 1 : 0) * ballProgress;
     const bsx = offX + isoX(nextGx, nextGy);
     const bsy = offY + isoY(nextGx, nextGy);
 
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.beginPath();
-    ctx.ellipse(bsx, bsy + 4, 10, 5, 0, 0, Math.PI * 2);
-    ctx.fill();
+    if (state !== 'gameover') {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(bsx, bsy + 4, 10, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
 
-    // Ball sphere
-    const grad = ctx.createRadialGradient(bsx - 3, bsy - 14, 2, bsx, bsy - 10, 12);
-    grad.addColorStop(0, '#A29BFE');
-    grad.addColorStop(1, '#6C5CE7');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(bsx, bsy - 10, 10, 0, Math.PI * 2);
-    ctx.fill();
+      const grad = ctx.createRadialGradient(bsx - 3, bsy - 14, 2, bsx, bsy - 10, 12);
+      grad.addColorStop(0, '#A29BFE');
+      grad.addColorStop(1, '#6C5CE7');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(bsx, bsy - 10, 10, 0, Math.PI * 2);
+      ctx.fill();
 
-    // Highlight
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.beginPath();
-    ctx.arc(bsx - 3, bsy - 14, 4, 0, Math.PI * 2);
-    ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.beginPath();
+      ctx.arc(bsx - 3, bsy - 14, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
-    // Score
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 40px Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(score, W / 2, 60);
+
+    if (combo >= 3 && state === 'playing') {
+      ctx.font = 'bold 16px Arial, sans-serif';
+      ctx.fillStyle = '#55EFC4';
+      ctx.fillText('COMBO x' + combo, W / 2, 85);
+    }
+
+    for (let fi = 0; fi < floatingTexts.length; fi++) {
+      const ft = floatingTexts[fi];
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, ft.life);
+      ctx.fillStyle = ft.color;
+      ctx.font = 'bold ' + ft.size + 'px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = 4;
+      ctx.fillText(ft.text, ft.x, ft.y);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+
+    if (flashAlpha > 0.01) {
+      ctx.fillStyle = flashColor;
+      ctx.globalAlpha = flashAlpha;
+      ctx.fillRect(-10, -10, W + 20, H + 20);
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+
+    drawMuteIcon(muteIconX, muteIconY);
   }
 
   function renderTitle() {
@@ -324,12 +569,19 @@
     ctx.font = '16px Arial, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.fillText('Tap to change direction', W / 2, H * 0.57);
+    ctx.fillText('Collect gems for bonus points!', W / 2, H * 0.61);
 
     if (bestScore > 0) {
       ctx.fillStyle = '#FDCB6E';
       ctx.font = '18px Arial, sans-serif';
-      ctx.fillText('Best: ' + bestScore, W / 2, H * 0.64);
+      ctx.fillText('Best: ' + bestScore, W / 2, H * 0.68);
     }
+
+    ctx.font = '13px Arial, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillText('P = Pause  |  M = Mute', W / 2, H * 0.92);
+
+    drawMuteIcon(muteIconX, muteIconY);
   }
 
   function renderGameOver() {
@@ -345,15 +597,46 @@
     ctx.font = 'bold 64px Arial, sans-serif';
     ctx.fillText(score, W / 2, H * 0.40);
 
+    if (score === bestScore && score > 0 && score > prevBestScore) {
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 22px Arial, sans-serif';
+      ctx.fillText('NEW BEST!', W / 2, H * 0.45);
+    }
+
     ctx.font = '20px Arial, sans-serif';
     ctx.fillStyle = '#FDCB6E';
-    ctx.fillText('Best: ' + bestScore, W / 2, H * 0.48);
+    ctx.fillText('Best: ' + bestScore, W / 2, H * 0.50);
 
     ctx.fillStyle = '#6C5CE7';
     roundRect(W / 2 - 90, H * 0.56, 180, 50, 25);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 20px Arial, sans-serif';
     ctx.fillText('Play Again', W / 2, H * 0.56 + 32);
+
+    drawMuteIcon(muteIconX, muteIconY);
+  }
+
+  function renderPause() {
+    render();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('PAUSED', W / 2, H * 0.40);
+
+    const alpha = 0.5 + 0.5 * Math.sin(Date.now() / 500);
+    ctx.globalAlpha = alpha;
+    ctx.font = '22px Arial, sans-serif';
+    ctx.fillText('Press P to Resume', W / 2, H * 0.50);
+    ctx.globalAlpha = 1;
+
+    ctx.font = '16px Arial, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillText('Score: ' + score, W / 2, H * 0.58);
+
+    drawMuteIcon(muteIconX, muteIconY);
   }
 
   function roundRect(x, y, w, h, r) {
@@ -376,14 +659,37 @@
     lastTime = ts;
     update(dt);
     if (state === 'title') renderTitle();
+    else if (state === 'playing' && paused) renderPause();
     else if (state === 'playing') render();
     else renderGameOver();
     requestAnimationFrame(gameLoop);
   }
 
-  canvas.addEventListener('mousedown', tap);
-  canvas.addEventListener('touchstart', e => { e.preventDefault(); tap(); }, { passive: false });
-  document.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); tap(); } });
+  function getCanvasCoords(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+    const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  }
+
+  canvas.addEventListener('mousedown', (e) => {
+    const coords = getCanvasCoords(e);
+    if (isInMuteButton(coords.x, coords.y)) { toggleMute(); return; }
+    tap();
+  });
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const coords = getCanvasCoords(e);
+    if (isInMuteButton(coords.x, coords.y)) { toggleMute(); return; }
+    tap();
+  }, { passive: false });
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { e.preventDefault(); tap(); }
+    if (e.code === 'KeyP' && state === 'playing') { paused = !paused; }
+    if (e.code === 'KeyM') { toggleMute(); }
+  });
 
   init();
   requestAnimationFrame(gameLoop);

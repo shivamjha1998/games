@@ -16,6 +16,15 @@
   .home-link { position: fixed; top: 12px; left: 12px; color: #776E65; text-decoration: none; font-size: 0.85rem; z-index: 10; }
   .home-link:hover { color: #2D3436; }
 
+  .mute-toggle {
+    position: fixed; top: 12px; right: 12px; z-index: 10;
+    background: none; border: none; cursor: pointer;
+    opacity: 0.6; transition: opacity 0.2s;
+    line-height: 1; padding: 4px;
+  }
+  .mute-toggle:hover { opacity: 1; }
+  .mute-toggle svg { display: block; }
+
   .container { width: 90vmin; max-width: 400px; }
 
   /* Header */
@@ -27,6 +36,15 @@
   }
   .score-box .label { font-size: 0.65rem; color: #EEE4DA; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
   .score-box .val { font-size: 1.2rem; color: #fff; font-weight: 900; }
+
+  /* Buttons row */
+  .btn-row { display: flex; gap: 8px; margin-bottom: 10px; padding: 0 4px; }
+  .btn-row button {
+    padding: 6px 16px; font-size: 0.8rem; font-weight: 700; border: none; border-radius: 6px;
+    background: #8F7A66; color: #fff; cursor: pointer; transition: background 0.2s;
+  }
+  .btn-row button:hover { background: #776E65; }
+  .btn-row button:disabled { opacity: 0.4; cursor: default; }
 
   /* Grid */
   .grid-wrap {
@@ -48,9 +66,87 @@
     transition: top 0.15s ease-in-out, left 0.15s ease-in-out;
   }
   .tile.new { animation: popIn 0.2s ease-out; }
-  .tile.merged { animation: popMerge 0.2s ease-out; }
+  .tile.merged { animation: bounceMerge 0.3s ease-out; }
   @keyframes popIn { 0% { transform: scale(0); } 100% { transform: scale(1); } }
-  @keyframes popMerge { 0% { transform: scale(1); } 50% { transform: scale(1.15); } 100% { transform: scale(1); } }
+  @keyframes bounceMerge {
+    0% { transform: scale(1); }
+    30% { transform: scale(1.22); }
+    60% { transform: scale(0.95); }
+    100% { transform: scale(1); }
+  }
+
+  /* Floating score text */
+  .float-score {
+    position: absolute; pointer-events: none; z-index: 6;
+    font-weight: 900; font-size: 1.1rem; color: #776E65;
+    animation: floatUp 0.7s ease-out forwards;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  }
+  @keyframes floatUp {
+    0% { opacity: 1; transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(-50px) scale(1.3); }
+  }
+
+  /* Milestone flash */
+  .milestone-flash {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0; border-radius: 12px;
+    pointer-events: none; z-index: 4;
+    animation: milestoneFlash 0.6s ease-out forwards;
+  }
+  @keyframes milestoneFlash {
+    0% { background: rgba(237, 197, 63, 0.4); }
+    100% { background: rgba(237, 197, 63, 0); }
+  }
+
+  /* Milestone text */
+  .milestone-text {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    pointer-events: none; z-index: 7;
+    font-weight: 900; font-size: clamp(1.4rem, 5vw, 2rem); color: #EDC53F;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    animation: milestonePopFade 1.2s ease-out forwards;
+    white-space: nowrap;
+  }
+  @keyframes milestonePopFade {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+    20% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+    40% { transform: translate(-50%, -50%) scale(1); }
+    80% { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%, -70%) scale(1); }
+  }
+
+  /* NEW BEST celebration */
+  .new-best-text {
+    position: absolute; top: 35%; left: 50%; transform: translate(-50%, -50%);
+    pointer-events: none; z-index: 8;
+    font-weight: 900; font-size: clamp(1.6rem, 6vw, 2.4rem);
+    background: linear-gradient(135deg, #FFD700, #FFA500, #FFD700);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+    animation: newBestPop 1.5s ease-out forwards;
+    white-space: nowrap;
+    filter: drop-shadow(0 2px 6px rgba(255, 165, 0, 0.4));
+  }
+  @keyframes newBestPop {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3) rotate(-5deg); }
+    15% { opacity: 1; transform: translate(-50%, -50%) scale(1.2) rotate(2deg); }
+    30% { transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+    75% { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%, -70%) scale(0.9); }
+  }
+
+  /* Gold particles */
+  .gold-particle {
+    position: absolute; pointer-events: none; z-index: 8;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #FFD700;
+    animation: particleBurst 1s ease-out forwards;
+  }
+  @keyframes particleBurst {
+    0% { opacity: 1; transform: translate(0, 0) scale(1); }
+    100% { opacity: 0; transform: translate(var(--px), var(--py)) scale(0); }
+  }
 
   /* Overlays */
   .overlay {
@@ -72,11 +168,12 @@
   .overlay button:hover { background: #776E65; }
   .overlay button + button { margin-top: 8px; }
 
-  .instructions { margin-top: 16px; font-size: 0.8rem; color: #776E65; text-align: center; padding: 0 8px; }
+  .instructions { margin-top: 16px; font-size: 0.8rem; color: #776E65; text-align: center; padding: 0 8px; line-height: 1.5; }
 </style>
 </head>
 <body>
 <a class="home-link" href="index.html">&#8592; Games</a>
+<button class="mute-toggle" id="mute-toggle" title="Toggle sound (M)"></button>
 <div class="container">
   <div class="header">
     <div class="title">2048</div>
@@ -84,6 +181,9 @@
       <div class="score-box"><div class="label">Score</div><div class="val" id="score">0</div></div>
       <div class="score-box"><div class="label">Best</div><div class="val" id="best">0</div></div>
     </div>
+  </div>
+  <div class="btn-row">
+    <button id="btn-undo" disabled title="Undo (U)">&#x21A9; Undo</button>
   </div>
   <div class="grid-wrap" id="grid-wrap">
     <div class="grid" id="grid"></div>
@@ -106,52 +206,109 @@
       <button id="btn-new">New Game</button>
     </div>
   </div>
-  <p class="instructions">Swipe or use arrow keys. Merge tiles to reach 2048!</p>
+  <p class="instructions">Swipe or arrow keys to slide. Merge tiles to reach 2048!<br>Press <strong>M</strong> to mute, <strong>U</strong> to undo.</p>
 </div>
 
 <script>
 (() => {
   const SIZE = 4;
   const LS_KEY = '2048_best';
+  const LS_MUTE = '2048_muted';
 
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('best');
   const gridEl = document.getElementById('grid');
   const tileLayer = document.getElementById('tile-layer');
+  const gridWrap = document.getElementById('grid-wrap');
   const overlayTitle = document.getElementById('overlay-title');
   const overlayOver = document.getElementById('overlay-gameover');
   const overlayWin = document.getElementById('overlay-win');
   const finalScoreText = document.getElementById('final-score-text');
+  const muteBtn = document.getElementById('mute-toggle');
+  const undoBtn = document.getElementById('btn-undo');
 
   let grid, score, bestScore, won, moving;
+  let displayedScore = 0;
+  let scoreAnimFrame = null;
+  let prevState = null; // for undo: { grid, score }
+  let hasUndone = false;
+  let newBestShown = false;
+  let lastMilestone = 0;
+
+  // --- Mute System ---
+  let muted = localStorage.getItem(LS_MUTE) === '1';
+  function updateMuteIcon() {
+    muteBtn.innerHTML = muted
+      ? '<svg width="24" height="20" viewBox="0 0 24 20"><polygon points="0,6 5,6 10,1 10,19 5,14 0,14" fill="#776E65"/><line x1="13" y1="5" x2="20" y2="15" stroke="#E74C3C" stroke-width="2.5" stroke-linecap="round"/><line x1="20" y1="5" x2="13" y2="15" stroke="#E74C3C" stroke-width="2.5" stroke-linecap="round"/></svg>'
+      : '<svg width="24" height="20" viewBox="0 0 24 20"><polygon points="0,6 5,6 10,1 10,19 5,14 0,14" fill="#776E65"/><path d="M13.2 6.2 A4 4 0 0 1 13.2 13.8" fill="none" stroke="#776E65" stroke-width="1.5" stroke-linecap="round"/><path d="M14.5 2.4 A8 8 0 0 1 14.5 17.6" fill="none" stroke="#776E65" stroke-width="1.5" stroke-linecap="round"/></svg>';
+  }
+  updateMuteIcon();
+  muteBtn.addEventListener('click', () => {
+    muted = !muted;
+    localStorage.setItem(LS_MUTE, muted ? '1' : '0');
+    updateMuteIcon();
+  });
 
   // --- Web Audio Sound System ---
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   let actx;
   function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
-  function tone(freq, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
-  function sweep(f1, f2, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
+
+  function tone(freq, dur, type, vol) {
+    if (!actx || muted) return;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, actx.currentTime);
+    g.gain.setValueAtTime(vol || 0.3, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+  }
+  function sweep(f1, f2, dur, type, vol) {
+    if (!actx || muted) return;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(f1, actx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.3, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+  }
+
   function sndSlide() { tone(250, 0.05, 'square', 0.1); }
   function sndMerge() { tone(520, 0.08, 'sine', 0.2); }
   function sndBigMerge() { tone(520, 0.08, 'sine', 0.25); setTimeout(() => tone(780, 0.12, 'sine', 0.3), 70); }
   function sndGameOver() { sweep(300, 80, 0.5, 'sawtooth', 0.2); }
+  function sndFanfare() {
+    if (!actx || muted) return;
+    tone(523, 0.15, 'sine', 0.25);
+    setTimeout(() => tone(659, 0.15, 'sine', 0.25), 120);
+    setTimeout(() => tone(784, 0.2, 'sine', 0.3), 240);
+    setTimeout(() => tone(1047, 0.3, 'sine', 0.3), 380);
+  }
+  function sndMilestone() {
+    if (!actx || muted) return;
+    tone(660, 0.1, 'sine', 0.2);
+    setTimeout(() => tone(880, 0.15, 'sine', 0.25), 100);
+  }
 
-  const COLORS = {
-    2:    { bg: '#EEE4DA', fg: '#776E65' },
-    4:    { bg: '#EDE0C8', fg: '#776E65' },
-    8:    { bg: '#F2B179', fg: '#F9F6F2' },
-    16:   { bg: '#F59563', fg: '#F9F6F2' },
-    32:   { bg: '#F67C5F', fg: '#F9F6F2' },
-    64:   { bg: '#F65E3B', fg: '#F9F6F2' },
-    128:  { bg: '#EDCF72', fg: '#F9F6F2' },
-    256:  { bg: '#EDCC61', fg: '#F9F6F2' },
-    512:  { bg: '#EDC850', fg: '#F9F6F2' },
-    1024: { bg: '#EDC53F', fg: '#F9F6F2' },
-    2048: { bg: '#EDC22E', fg: '#F9F6F2' },
+  // --- Gradient Tile Colors ---
+  const TILE_STYLES = {
+    2:    { bg: 'linear-gradient(135deg, #EEE4DA, #E8DDD0)', fg: '#776E65' },
+    4:    { bg: 'linear-gradient(135deg, #EDE0C8, #E4D5B5)', fg: '#776E65' },
+    8:    { bg: 'linear-gradient(135deg, #F2B179, #E89A5A)', fg: '#F9F6F2' },
+    16:   { bg: 'linear-gradient(135deg, #F59563, #E87D48)', fg: '#F9F6F2' },
+    32:   { bg: 'linear-gradient(135deg, #F67C5F, #E55A3A)', fg: '#F9F6F2' },
+    64:   { bg: 'linear-gradient(135deg, #F65E3B, #D94420)', fg: '#F9F6F2' },
+    128:  { bg: 'linear-gradient(135deg, #EDCF72, #E0BC4A)', fg: '#F9F6F2' },
+    256:  { bg: 'linear-gradient(135deg, #EDCC61, #D9B83E)', fg: '#F9F6F2' },
+    512:  { bg: 'linear-gradient(135deg, #EDC850, #D4AD2E)', fg: '#F9F6F2', glow: '0 0 18px 4px rgba(237, 200, 80, 0.45)' },
+    1024: { bg: 'linear-gradient(135deg, #EDC53F, #C9A420)', fg: '#F9F6F2', glow: '0 0 22px 6px rgba(237, 197, 63, 0.55)' },
+    2048: { bg: 'linear-gradient(135deg, #EDC22E, #C49A10)', fg: '#F9F6F2', glow: '0 0 28px 8px rgba(237, 194, 46, 0.65)' },
   };
 
-  function getColor(val) {
-    return COLORS[val] || { bg: '#3C3A32', fg: '#F9F6F2' };
+  function getTileStyle(val) {
+    if (TILE_STYLES[val]) return TILE_STYLES[val];
+    return { bg: 'linear-gradient(135deg, #3C3A32, #2A2826)', fg: '#F9F6F2', glow: '0 0 30px 8px rgba(60, 58, 50, 0.5)' };
   }
 
   function fontSize(val) {
@@ -168,11 +325,131 @@
     gridEl.appendChild(cell);
   }
 
+  // --- Animated Score Counter ---
+  function animateScore(target) {
+    if (scoreAnimFrame) cancelAnimationFrame(scoreAnimFrame);
+    const start = displayedScore;
+    const diff = target - start;
+    if (diff === 0) return;
+    const duration = Math.min(400, Math.max(120, diff * 2));
+    const startTime = performance.now();
+    function step(now) {
+      const elapsed = now - startTime;
+      const t = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+      displayedScore = Math.round(start + diff * eased);
+      scoreEl.textContent = displayedScore;
+      if (t < 1) {
+        scoreAnimFrame = requestAnimationFrame(step);
+      } else {
+        displayedScore = target;
+        scoreEl.textContent = target;
+        scoreAnimFrame = null;
+      }
+    }
+    scoreAnimFrame = requestAnimationFrame(step);
+  }
+
+  // --- Floating "+N" Text ---
+  function showFloatingScore(value, r, c) {
+    const layerRect = tileLayer.getBoundingClientRect();
+    const gap = 10;
+    const cellSize = (layerRect.width - gap * (SIZE - 1)) / SIZE;
+    const x = c * (cellSize + gap) + cellSize / 2;
+    const y = r * (cellSize + gap);
+
+    const el = document.createElement('div');
+    el.className = 'float-score';
+    el.textContent = '+' + value;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.transform = 'translateX(-50%)';
+    tileLayer.parentElement.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+  }
+
+  // --- Milestone Celebration ---
+  function showMilestone(text) {
+    // Flash
+    const flash = document.createElement('div');
+    flash.className = 'milestone-flash';
+    gridWrap.appendChild(flash);
+    flash.addEventListener('animationend', () => flash.remove());
+
+    // Text
+    const el = document.createElement('div');
+    el.className = 'milestone-text';
+    el.textContent = text;
+    gridWrap.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+
+    sndMilestone();
+  }
+
+  // --- NEW BEST Celebration ---
+  function showNewBest() {
+    const el = document.createElement('div');
+    el.className = 'new-best-text';
+    el.textContent = 'NEW BEST!';
+    gridWrap.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+
+    // Gold particles
+    for (let i = 0; i < 12; i++) {
+      const p = document.createElement('div');
+      p.className = 'gold-particle';
+      const angle = (Math.PI * 2 / 12) * i + (Math.random() - 0.5) * 0.5;
+      const dist = 50 + Math.random() * 60;
+      p.style.setProperty('--px', Math.cos(angle) * dist + 'px');
+      p.style.setProperty('--py', Math.sin(angle) * dist + 'px');
+      p.style.left = '50%';
+      p.style.top = '35%';
+      p.style.width = (4 + Math.random() * 4) + 'px';
+      p.style.height = p.style.width;
+      const colors = ['#FFD700', '#FFA500', '#FFE066', '#FFCC00'];
+      p.style.background = colors[Math.floor(Math.random() * colors.length)];
+      gridWrap.appendChild(p);
+      p.addEventListener('animationend', () => p.remove());
+    }
+
+    sndFanfare();
+  }
+
+  // --- Undo System ---
+  function saveState() {
+    prevState = {
+      grid: grid.map(r => [...r]),
+      score: score
+    };
+    hasUndone = false;
+    undoBtn.disabled = false;
+  }
+
+  function performUndo() {
+    if (!prevState || hasUndone || moving) return;
+    grid = prevState.grid.map(r => [...r]);
+    score = prevState.score;
+    animateScore(score);
+    hasUndone = true;
+    undoBtn.disabled = true;
+    renderTiles();
+  }
+
+  undoBtn.addEventListener('click', () => {
+    performUndo();
+  });
+
   function init() {
     grid = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
     score = 0;
+    displayedScore = 0;
     won = false;
     moving = false;
+    prevState = null;
+    hasUndone = false;
+    newBestShown = false;
+    lastMilestone = 0;
+    undoBtn.disabled = true;
     bestScore = parseInt(localStorage.getItem(LS_KEY) || '0');
     bestEl.textContent = bestScore;
     scoreEl.textContent = '0';
@@ -194,26 +471,32 @@
 
   function slideRow(row) {
     let merged = 0;
+    const mergePositions = [];
     const filtered = row.filter(v => v !== 0);
     const result = [];
+    let ri = 0;
     for (let i = 0; i < filtered.length; i++) {
       if (i < filtered.length - 1 && filtered[i] === filtered[i + 1]) {
         const val = filtered[i] * 2;
         result.push(val);
         merged += val;
-        i++; // skip next
+        mergePositions.push({ idx: ri, val });
+        i++;
       } else {
         result.push(filtered[i]);
       }
+      ri++;
     }
     while (result.length < SIZE) result.push(0);
-    return { result, merged };
+    return { result, merged, mergePositions };
   }
 
   function move(direction) {
     if (moving) return;
     let moved = false;
     let totalMerged = 0;
+    const mergeInfo = []; // { r, c, val } for floating scores
+    const mergedCells = new Set(); // "r,c" for bounce animation
     const newGrid = grid.map(r => [...r]);
 
     function getRow(r, c, dir) {
@@ -239,10 +522,25 @@
 
     for (let i = 0; i < count; i++) {
       const row = isRow ? getRow(i, 0, direction) : getRow(0, i, direction);
-      const { result, merged } = slideRow(row);
+      const { result, merged, mergePositions } = slideRow(row);
       totalMerged += merged;
 
-      // Check if changed
+      // Track merge positions for floating scores and bounce
+      for (const mp of mergePositions) {
+        let mr, mc;
+        if (isRow) {
+          mr = i;
+          if (direction === 'left') mc = mp.idx;
+          else mc = SIZE - 1 - mp.idx;
+        } else {
+          mc = i;
+          if (direction === 'up') mr = mp.idx;
+          else mr = SIZE - 1 - mp.idx;
+        }
+        mergeInfo.push({ r: mr, c: mc, val: mp.val });
+        mergedCells.add(mr + ',' + mc);
+      }
+
       const origRow = isRow ? getRow(i, 0, direction) : getRow(0, i, direction);
       if (result.some((v, idx) => v !== origRow[idx])) moved = true;
 
@@ -252,25 +550,48 @@
 
     if (!moved) return;
 
+    // Save state for undo (before this move's changes)
+    saveState();
+
     sndSlide();
     if (totalMerged >= 256) sndBigMerge();
     else if (totalMerged > 0) sndMerge();
 
     grid = newGrid;
+    const oldScore = score;
     score += totalMerged;
-    scoreEl.textContent = score;
+    animateScore(score);
+
+    // Check for new best
     if (score > bestScore) {
+      const wasBest = bestScore;
       bestScore = score;
       bestEl.textContent = bestScore;
       localStorage.setItem(LS_KEY, bestScore);
+      if (!newBestShown && wasBest > 0 && oldScore <= wasBest) {
+        newBestShown = true;
+        showNewBest();
+      }
+    }
+
+    // Check milestones (every 5000 points)
+    const currentMilestone = Math.floor(score / 5000);
+    if (currentMilestone > lastMilestone && lastMilestone >= 0) {
+      lastMilestone = currentMilestone;
+      showMilestone(currentMilestone * 5000 + ' points!');
     }
 
     moving = true;
-    renderTiles();
+    renderTiles(null, mergedCells);
+
+    // Show floating merge scores
+    for (const mi of mergeInfo) {
+      showFloatingScore(mi.val, mi.r, mi.c);
+    }
 
     setTimeout(() => {
       const newCell = addRandom();
-      renderTiles(newCell);
+      renderTiles(newCell, null);
       moving = false;
 
       // Check win
@@ -299,7 +620,7 @@
     return true;
   }
 
-  function renderTiles(newCell) {
+  function renderTiles(newCell, mergedCells) {
     tileLayer.innerHTML = '';
     const layerRect = tileLayer.getBoundingClientRect();
     const gap = 10;
@@ -313,19 +634,20 @@
         const tile = document.createElement('div');
         tile.className = 'tile';
         if (newCell && newCell.r === r && newCell.c === c) tile.classList.add('new');
+        if (mergedCells && mergedCells.has(r + ',' + c)) tile.classList.add('merged');
 
-        const color = getColor(val);
+        const style = getTileStyle(val);
         tile.style.width = cellSize + 'px';
         tile.style.height = cellSize + 'px';
         tile.style.left = c * (cellSize + gap) + 'px';
         tile.style.top = r * (cellSize + gap) + 'px';
-        tile.style.background = color.bg;
-        tile.style.color = color.fg;
+        tile.style.background = style.bg;
+        tile.style.color = style.fg;
         tile.style.fontSize = fontSize(val);
         tile.textContent = val;
 
-        if (val === 2048) {
-          tile.style.boxShadow = '0 0 20px 5px rgba(237, 194, 46, 0.5)';
+        if (style.glow) {
+          tile.style.boxShadow = style.glow;
         }
 
         tileLayer.appendChild(tile);
@@ -335,7 +657,6 @@
 
   // Swipe detection
   let touchStartX, touchStartY;
-  const gridWrap = document.getElementById('grid-wrap');
 
   gridWrap.addEventListener('touchstart', e => {
     if (moving) return;
@@ -356,6 +677,14 @@
   document.addEventListener('keydown', e => {
     const map = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' };
     if (map[e.code]) { e.preventDefault(); move(map[e.code]); }
+    if (e.code === 'KeyM') {
+      muted = !muted;
+      localStorage.setItem(LS_MUTE, muted ? '1' : '0');
+      updateMuteIcon();
+    }
+    if (e.code === 'KeyU') {
+      performUndo();
+    }
   });
 
   // Buttons

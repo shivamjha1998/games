@@ -40,21 +40,103 @@
     { name: 'banana', color: '#F1C40F', inner: '#FFEAA7', r: 22, leaf: false },
   ];
 
+  const FREEZE_TYPE = { name: 'freeze', color: '#74B9FF', inner: '#A3D8FF', r: 22, leaf: false, isFreeze: true };
+
   let state, score, bestScore, combo, comboTimer, misses, maxMisses;
   let fruits, halves, bombs, particles, trail, spawnTimer, lastTime;
   let waveCount;
+  let floatingTexts;
+  let paused;
+  let shakeIntensity, shakeDuration, shakeTimer;
+  let flashColor, flashAlpha, flashDuration, flashTimer;
+  let newBestTriggered, newBestParticles;
+  let lastMilestone;
+  let freezeTimer, freezeActive;
+  let swipeSliceCount;
+
+  // --- Mute ---
+  let muted = localStorage.getItem('fruitslice_muted') === 'true';
 
   // --- Web Audio Sound System ---
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   let actx;
   function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
-  function tone(freq, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
-  function sweep(f1, f2, dur, type, vol) { if (!actx) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
-  function noise(dur, vol) { if (!actx) return; const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = buf; g.gain.setValueAtTime(vol || 0.15, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); s.connect(g); g.connect(actx.destination); s.start(); }
+
+  function tone(freq, dur, type, vol) {
+    if (!actx || muted) return;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, actx.currentTime);
+    g.gain.setValueAtTime(vol || 0.3, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+  }
+
+  function sweep(f1, f2, dur, type, vol) {
+    if (!actx || muted) return;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(f1, actx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.3, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+  }
+
+  function noise(dur, vol) {
+    if (!actx || muted) return;
+    const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const s = actx.createBufferSource(), g = actx.createGain();
+    s.buffer = buf;
+    g.gain.setValueAtTime(vol || 0.15, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+    s.connect(g); g.connect(actx.destination); s.start();
+  }
+
   function sndSlice() { noise(0.06, 0.25); sweep(800, 1200, 0.08, 'sine', 0.2); }
   function sndBomb() { noise(0.3, 0.35); sweep(200, 50, 0.4, 'sawtooth', 0.3); }
   function sndCombo() { tone(660, 0.08, 'sine', 0.2); setTimeout(() => tone(880, 0.08, 'sine', 0.2), 60); setTimeout(() => tone(1100, 0.1, 'sine', 0.25), 120); }
   function sndMiss() { sweep(300, 150, 0.2, 'sine', 0.15); }
+  function sndFreeze() { tone(1200, 0.15, 'sine', 0.2); setTimeout(() => tone(1600, 0.2, 'sine', 0.15), 80); }
+  function sndCritical() { tone(880, 0.06, 'sine', 0.2); setTimeout(() => tone(1100, 0.06, 'sine', 0.2), 50); setTimeout(() => tone(1320, 0.06, 'sine', 0.2), 100); setTimeout(() => tone(1760, 0.12, 'sine', 0.3), 150); }
+  function sndMilestone() { tone(523, 0.1, 'sine', 0.2); setTimeout(() => tone(659, 0.1, 'sine', 0.2), 80); setTimeout(() => tone(784, 0.1, 'sine', 0.2), 160); setTimeout(() => tone(1047, 0.15, 'sine', 0.25), 240); }
+  function sndNewBest() { [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => tone(f, 0.15, 'sine', 0.25), i * 100)); }
+
+  // --- Screen Shake ---
+  function triggerShake(intensity, duration) {
+    shakeIntensity = intensity;
+    shakeDuration = duration;
+    shakeTimer = duration;
+  }
+
+  // --- Screen Flash ---
+  function triggerFlash(color, duration) {
+    flashColor = color;
+    flashAlpha = 0.5;
+    flashDuration = duration;
+    flashTimer = duration;
+  }
+
+  // --- Floating Text ---
+  function addFloatingText(x, y, text, color, size, duration) {
+    floatingTexts.push({ x, y, text, color, size: size || 22, life: duration || 1.0, maxLife: duration || 1.0, vy: -80 });
+  }
+
+  // --- New Best Particles ---
+  function spawnNewBestParticles() {
+    for (let i = 0; i < 40; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 60 + Math.random() * 180;
+      newBestParticles.push({
+        x: W / 2, y: H * 0.35,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60,
+        life: 1.5 + Math.random(), color: Math.random() < 0.5 ? '#FFD700' : '#FFA500',
+        size: 2 + Math.random() * 5
+      });
+    }
+  }
 
   function init() {
     state = 'title';
@@ -69,9 +151,24 @@
     bombs = [];
     particles = [];
     trail = [];
+    floatingTexts = [];
     spawnTimer = 1;
     waveCount = 0;
     lastTime = 0;
+    paused = false;
+    shakeIntensity = 0;
+    shakeDuration = 0;
+    shakeTimer = 0;
+    flashColor = '';
+    flashAlpha = 0;
+    flashDuration = 0;
+    flashTimer = 0;
+    newBestTriggered = false;
+    newBestParticles = [];
+    lastMilestone = 0;
+    freezeTimer = 0;
+    freezeActive = false;
+    swipeSliceCount = 0;
   }
 
   function tap() {
@@ -83,9 +180,11 @@
     waveCount++;
     const count = Math.min(2 + Math.floor(waveCount / 3), 6);
     const hasBomb = waveCount > 3 && Math.random() < 0.3;
+    const hasFreeze = waveCount > 5 && Math.random() < 0.12;
 
     for (let i = 0; i < count; i++) {
       setTimeout(() => {
+        if (state !== 'playing') return;
         const ft = FRUIT_TYPES[Math.floor(Math.random() * FRUIT_TYPES.length)];
         const x = 40 + Math.random() * (W - 80);
         const vx = (W / 2 - x) * (0.3 + Math.random() * 0.5);
@@ -101,11 +200,26 @@
 
     if (hasBomb) {
       setTimeout(() => {
+        if (state !== 'playing') return;
         const x = 60 + Math.random() * (W - 120);
         const vx = (W / 2 - x) * 0.4;
         bombs.push({
           x, y: H + 30, vx, vy: -750 - Math.random() * 200,
           rotation: 0, rotSpeed: 3
+        });
+      }, Math.random() * count * 150);
+    }
+
+    if (hasFreeze) {
+      setTimeout(() => {
+        if (state !== 'playing') return;
+        const x = 50 + Math.random() * (W - 100);
+        const vx = (W / 2 - x) * 0.4;
+        fruits.push({
+          x, y: H + 30, vx, vy: -720 - Math.random() * 250,
+          rotation: Math.random() * Math.PI * 2,
+          rotSpeed: (Math.random() - 0.5) * 4,
+          type: FREEZE_TYPE, sliced: false
         });
       }, Math.random() * count * 150);
     }
@@ -116,8 +230,62 @@
     score++;
     combo++;
     comboTimer = 0.6;
-    sndSlice();
-    if (combo > 1) sndCombo();
+    swipeSliceCount++;
+
+    if (fruit.type.isFreeze) {
+      sndFreeze();
+      freezeTimer = 3.0;
+      freezeActive = true;
+      addFloatingText(fruit.x, fruit.y, 'FREEZE!', '#74B9FF', 26, 1.2);
+      triggerFlash('rgba(116,185,255,0.3)', 0.4);
+      for (let i = 0; i < 20; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 60 + Math.random() * 120;
+        particles.push({
+          x: fruit.x, y: fruit.y,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 40,
+          life: 1.2, color: Math.random() < 0.5 ? '#74B9FF' : '#DFE6FF',
+          size: 2 + Math.random() * 4, sparkle: true
+        });
+      }
+    } else {
+      sndSlice();
+    }
+
+    if (combo > 1) {
+      sndCombo();
+      addFloatingText(fruit.x, fruit.y - 30, 'COMBO x' + combo + '!', '#FDCB6E', 20, 0.9);
+    }
+
+    addFloatingText(fruit.x + 15, fruit.y - 15, '+1', '#fff', 18, 0.7);
+
+    // Milestone every 25 points
+    const newMilestone = Math.floor(score / 25);
+    if (newMilestone > lastMilestone) {
+      lastMilestone = newMilestone;
+      sndMilestone();
+      addFloatingText(W / 2, H * 0.35, score + ' POINTS!', '#FDCB6E', 32, 1.5);
+      triggerFlash('rgba(253,203,110,0.25)', 0.5);
+      for (let i = 0; i < 25; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 80 + Math.random() * 160;
+        particles.push({
+          x: W / 2, y: H * 0.4,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 80,
+          life: 1.5, color: ['#FDCB6E', '#E74C3C', '#2ECC71', '#74B9FF', '#E67E22'][Math.floor(Math.random() * 5)],
+          size: 3 + Math.random() * 5
+        });
+      }
+    }
+
+    // New best check
+    if (score > bestScore && !newBestTriggered && bestScore > 0) {
+      newBestTriggered = true;
+      sndNewBest();
+      addFloatingText(W / 2, H * 0.25, 'NEW BEST!', '#FFD700', 36, 2.5);
+      triggerFlash('rgba(255,215,0,0.3)', 0.6);
+      spawnNewBestParticles();
+    }
 
     // Create two halves
     const angle = Math.random() * Math.PI;
@@ -133,34 +301,97 @@
       });
     }
 
-    // Juice particles
+    // Enhanced juice particles
     const color = fruit.type.color;
-    for (let i = 0; i < 10; i++) {
+    const pCount = fruit.type.isFreeze ? 15 : 18;
+    for (let i = 0; i < pCount; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = 80 + Math.random() * 150;
+      const sp = 80 + Math.random() * 200;
       particles.push({
         x: fruit.x, y: fruit.y,
         vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 50,
-        life: 1, color, size: 2 + Math.random() * 4
+        life: 1, color, size: 2 + Math.random() * 5
+      });
+    }
+
+    // Sparkle trail at slice point
+    for (let i = 0; i < 6; i++) {
+      particles.push({
+        x: fruit.x + (Math.random() - 0.5) * 20,
+        y: fruit.y + (Math.random() - 0.5) * 20,
+        vx: (Math.random() - 0.5) * 40,
+        vy: -30 - Math.random() * 60,
+        life: 0.8 + Math.random() * 0.4,
+        color: '#fff', size: 1 + Math.random() * 2, sparkle: true
       });
     }
   }
 
-  function hitBomb() {
+  function checkCriticalSlice() {
+    if (swipeSliceCount >= 3) {
+      const bonus = swipeSliceCount;
+      score += bonus;
+      sndCritical();
+      addFloatingText(W / 2, H * 0.45, 'CRITICAL x' + swipeSliceCount + '! +' + bonus, '#FF6348', 28, 1.5);
+      triggerFlash('rgba(255,99,72,0.2)', 0.3);
+      for (let i = 0; i < 20; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 100 + Math.random() * 150;
+        particles.push({
+          x: W / 2, y: H * 0.5,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60,
+          life: 1.2, color: Math.random() < 0.5 ? '#FF6348' : '#FFD700',
+          size: 3 + Math.random() * 5, sparkle: true
+        });
+      }
+    }
+  }
+
+  function hitBomb(bx, by) {
     sndBomb();
+    triggerShake(12, 0.4);
+    triggerFlash('rgba(231,76,60,0.4)', 0.3);
     state = 'gameover';
     bestScore = Math.max(score, bestScore);
     localStorage.setItem('fruitslice_best', bestScore);
 
-    // Explosion particles
-    for (let i = 0; i < 20; i++) {
+    const cx = bx || W / 2, cy = by || H / 2;
+    for (let i = 0; i < 40; i++) {
       const a = Math.random() * Math.PI * 2;
-      const sp = 100 + Math.random() * 200;
-      particles.push({ x: W / 2, y: H / 2, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1.5, color: '#E74C3C', size: 4 + Math.random() * 6 });
+      const sp = 100 + Math.random() * 300;
+      const colors = ['#E74C3C', '#FF6348', '#FF9F43', '#FFD700', '#636E72'];
+      particles.push({
+        x: cx, y: cy,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 1.5 + Math.random(),
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: 3 + Math.random() * 8
+      });
+    }
+    for (let i = 0; i < 15; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 30 + Math.random() * 80;
+      particles.push({
+        x: cx, y: cy,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 40,
+        life: 2, color: 'rgba(100,100,100,0.6)', size: 8 + Math.random() * 12
+      });
     }
   }
 
-  // Swipe / mouse tracking
+  function handleMissDeath() {
+    triggerShake(8, 0.3);
+    triggerFlash('rgba(231,76,60,0.3)', 0.25);
+    state = 'gameover';
+    bestScore = Math.max(score, bestScore);
+    localStorage.setItem('fruitslice_best', bestScore);
+  }
+
+  function toggleMute() {
+    muted = !muted;
+    localStorage.setItem('fruitslice_muted', muted ? 'true' : 'false');
+  }
+
   let swiping = false;
   let swipePrev = null;
 
@@ -174,18 +405,29 @@
 
   function onSwipeStart(e) {
     if (state !== 'playing') { tap(); return; }
+    if (paused) return;
     swiping = true;
     swipePrev = getPos(e);
     trail.push({ ...swipePrev, life: 1 });
+    swipeSliceCount = 0;
   }
 
   function onSwipeMove(e) {
-    if (!swiping || state !== 'playing') return;
+    if (!swiping || state !== 'playing' || paused) return;
     const pos = getPos(e);
     trail.push({ ...pos, life: 1 });
     if (trail.length > 20) trail.shift();
 
-    // Check slice against fruits
+    if (Math.random() < 0.4) {
+      particles.push({
+        x: pos.x + (Math.random() - 0.5) * 10,
+        y: pos.y + (Math.random() - 0.5) * 10,
+        vx: (Math.random() - 0.5) * 20,
+        vy: (Math.random() - 0.5) * 20 - 15,
+        life: 0.5, color: '#fff', size: 1 + Math.random() * 1.5, sparkle: true
+      });
+    }
+
     if (swipePrev) {
       for (const f of fruits) {
         if (f.sliced) continue;
@@ -193,17 +435,21 @@
           sliceFruit(f);
         }
       }
-      // Check bombs
       for (const b of bombs) {
         if (circleLineIntersect(b.x, b.y, 24, swipePrev.x, swipePrev.y, pos.x, pos.y)) {
-          hitBomb(); return;
+          hitBomb(b.x, b.y); return;
         }
       }
     }
     swipePrev = pos;
   }
 
-  function onSwipeEnd() { swiping = false; swipePrev = null; }
+  function onSwipeEnd() {
+    if (swiping) checkCriticalSlice();
+    swiping = false;
+    swipePrev = null;
+    swipeSliceCount = 0;
+  }
 
   function circleLineIntersect(cx, cy, cr, x1, y1, x2, y2) {
     const dx = x2 - x1, dy = y2 - y1;
@@ -215,60 +461,92 @@
     return Math.sqrt((cx - nearX) ** 2 + (cy - nearY) ** 2) < cr;
   }
 
-  function update(dt) {
-    if (state !== 'playing') return;
+  function isMuteClick(e) {
+    const pos = getPos(e);
+    return pos.x >= W - 50 && pos.x <= W - 10 && pos.y >= 55 && pos.y <= 85;
+  }
 
-    // Spawn waves
+  function update(dt) {
+    if (shakeTimer > 0) {
+      shakeTimer -= dt;
+      if (shakeTimer < 0) shakeTimer = 0;
+    }
+
+    if (flashTimer > 0) {
+      flashTimer -= dt;
+      flashAlpha = 0.5 * (flashTimer / flashDuration);
+      if (flashTimer < 0) { flashTimer = 0; flashAlpha = 0; }
+    }
+
+    for (let i = floatingTexts.length - 1; i >= 0; i--) {
+      const ft = floatingTexts[i];
+      ft.y += ft.vy * dt;
+      ft.life -= dt;
+      if (ft.life <= 0) floatingTexts.splice(i, 1);
+    }
+
+    for (let i = newBestParticles.length - 1; i >= 0; i--) {
+      const p = newBestParticles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += 300 * dt;
+      p.life -= dt;
+      if (p.life <= 0) newBestParticles.splice(i, 1);
+    }
+
+    if (state !== 'playing') return;
+    if (paused) return;
+
+    const timeScale = freezeActive ? 0.35 : 1.0;
+    if (freezeActive) {
+      freezeTimer -= dt;
+      if (freezeTimer <= 0) { freezeActive = false; freezeTimer = 0; }
+    }
+    const adt = dt * timeScale;
+
     spawnTimer -= dt;
     if (spawnTimer <= 0) {
       spawnWave();
       spawnTimer = Math.max(1.0, 2.2 - waveCount * 0.08);
     }
 
-    // Update fruits
     for (let i = fruits.length - 1; i >= 0; i--) {
       const f = fruits[i];
-      f.x += f.vx * dt;
-      f.y += f.vy * dt;
-      f.vy += GRAVITY * dt;
-      f.rotation += f.rotSpeed * dt;
+      f.x += f.vx * adt;
+      f.y += f.vy * adt;
+      f.vy += GRAVITY * adt;
+      f.rotation += f.rotSpeed * adt;
 
       if (f.y > H + 50) {
-        if (!f.sliced) {
+        if (!f.sliced && !f.type.isFreeze) {
           sndMiss();
           misses++;
           if (misses >= maxMisses) {
-            state = 'gameover';
-            bestScore = Math.max(score, bestScore);
-            localStorage.setItem('fruitslice_best', bestScore);
+            handleMissDeath();
           }
         }
         fruits.splice(i, 1);
       }
     }
 
-    // Update bombs
     for (let i = bombs.length - 1; i >= 0; i--) {
       const b = bombs[i];
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
-      b.vy += GRAVITY * dt;
-      b.rotation += b.rotSpeed * dt;
+      b.x += b.vx * adt;
+      b.y += b.vy * adt;
+      b.vy += GRAVITY * adt;
+      b.rotation += b.rotSpeed * adt;
       if (b.y > H + 50) bombs.splice(i, 1);
     }
 
-    // Update halves
     for (let i = halves.length - 1; i >= 0; i--) {
       const h = halves[i];
-      h.x += h.vx * dt;
-      h.y += h.vy * dt;
-      h.vy += GRAVITY * dt;
-      h.rotation += h.rotSpeed * dt;
+      h.x += h.vx * adt;
+      h.y += h.vy * adt;
+      h.vy += GRAVITY * adt;
+      h.rotation += h.rotSpeed * adt;
       h.life -= dt;
       if (h.life <= 0 || h.y > H + 100) halves.splice(i, 1);
     }
 
-    // Particles
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
       p.x += p.vx * dt; p.y += p.vy * dt;
@@ -277,39 +555,120 @@
       if (p.life <= 0) particles.splice(i, 1);
     }
 
-    // Trail fade
     for (let i = trail.length - 1; i >= 0; i--) {
       trail[i].life -= dt * 4;
       if (trail[i].life <= 0) trail.splice(i, 1);
     }
 
-    // Combo timer
     if (combo > 0) {
       comboTimer -= dt;
       if (comboTimer <= 0) combo = 0;
     }
   }
 
+  function applyShake() {
+    if (shakeTimer > 0) {
+      const factor = shakeTimer / shakeDuration;
+      const ox = (Math.random() - 0.5) * 2 * shakeIntensity * factor;
+      const oy = (Math.random() - 0.5) * 2 * shakeIntensity * factor;
+      ctx.translate(ox, oy);
+    }
+  }
+
+  function renderFlash() {
+    if (flashTimer > 0 && flashColor) {
+      ctx.save();
+      ctx.globalAlpha = flashAlpha;
+      ctx.fillStyle = flashColor;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  }
+
+  function renderFloatingTexts() {
+    floatingTexts.forEach(ft => {
+      const alpha = Math.min(1, ft.life / (ft.maxLife * 0.3));
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, alpha);
+      ctx.fillStyle = ft.color;
+      ctx.font = 'bold ' + ft.size + 'px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = 4;
+      ctx.fillText(ft.text, ft.x, ft.y);
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+  }
+
+  function renderNewBestParticles() {
+    newBestParticles.forEach(p => {
+      ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function renderMuteButton() {
+    const ix = W - 40, iy = 57, sz = 20;
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = '#2C3E50'; ctx.strokeStyle = '#2C3E50'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(ix, iy + 6); ctx.lineTo(ix + 5, iy + 6);
+    ctx.lineTo(ix + 10, iy + 1); ctx.lineTo(ix + 10, iy + sz - 1);
+    ctx.lineTo(ix + 5, iy + sz - 6); ctx.lineTo(ix, iy + sz - 6);
+    ctx.closePath(); ctx.fill();
+    if (muted) {
+      ctx.strokeStyle = '#E74C3C'; ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(ix + 13, iy + 5); ctx.lineTo(ix + 20, iy + sz - 5);
+      ctx.moveTo(ix + 20, iy + 5); ctx.lineTo(ix + 13, iy + sz - 5);
+      ctx.stroke();
+    } else {
+      ctx.strokeStyle = '#2C3E50'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(ix + 12, iy + sz / 2, 4, -Math.PI * 0.4, Math.PI * 0.4); ctx.stroke();
+      ctx.beginPath(); ctx.arc(ix + 12, iy + sz / 2, 8, -Math.PI * 0.4, Math.PI * 0.4); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function renderFreezeOverlay() {
+    if (freezeActive) {
+      ctx.save();
+      const freezeAlpha = Math.min(0.12, freezeTimer * 0.05);
+      ctx.fillStyle = 'rgba(116,185,255,' + freezeAlpha + ')';
+      ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = 'rgba(116,185,255,' + (freezeAlpha * 2) + ')';
+      ctx.lineWidth = 6;
+      ctx.strokeRect(3, 3, W - 6, H - 6);
+      ctx.restore();
+    }
+  }
+
   function render() {
-    // Background gradient
+    ctx.save();
+    applyShake();
+
     const grad = ctx.createLinearGradient(0, 0, 0, H);
     grad.addColorStop(0, '#FFEAA7');
     grad.addColorStop(1, '#DFE6E9');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(-20, -20, W + 40, H + 40);
 
-    // Subtle pattern
     ctx.fillStyle = 'rgba(0,0,0,0.02)';
     for (let y = 0; y < H; y += 30) {
       ctx.fillRect(0, y, W, 1);
     }
 
-    // Trail
     if (trail.length > 1) {
       for (let i = 1; i < trail.length; i++) {
         const t = trail[i];
         const prev = trail[i - 1];
-        ctx.strokeStyle = `rgba(255,255,255,${t.life * 0.8})`;
+        ctx.strokeStyle = 'rgba(255,255,255,' + (t.life * 0.8) + ')';
         ctx.lineWidth = 3 + t.life * 4;
         ctx.lineCap = 'round';
         ctx.beginPath();
@@ -317,36 +676,44 @@
         ctx.lineTo(t.x, t.y);
         ctx.stroke();
       }
-      // Glow
-      ctx.shadowBlur = 0;
     }
 
-    // Fruits
     fruits.forEach(f => {
       if (f.sliced) return;
       ctx.save();
       ctx.translate(f.x, f.y);
       ctx.rotate(f.rotation);
 
-      // Shadow
       ctx.fillStyle = 'rgba(0,0,0,0.1)';
       ctx.beginPath(); ctx.arc(3, 3, f.type.r, 0, Math.PI * 2); ctx.fill();
 
-      // Main body
       ctx.fillStyle = f.type.color;
       ctx.beginPath(); ctx.arc(0, 0, f.type.r, 0, Math.PI * 2); ctx.fill();
 
-      // Highlight
       ctx.fillStyle = 'rgba(255,255,255,0.25)';
       ctx.beginPath(); ctx.arc(-f.type.r * 0.25, -f.type.r * 0.3, f.type.r * 0.4, 0, Math.PI * 2); ctx.fill();
 
-      // Leaf
+      if (f.type.isFreeze) {
+        const sparkAlpha = 0.3 + 0.3 * Math.sin(Date.now() / 150);
+        ctx.fillStyle = 'rgba(255,255,255,' + sparkAlpha + ')';
+        ctx.beginPath(); ctx.arc(f.type.r * 0.3, -f.type.r * 0.1, f.type.r * 0.2, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(-f.type.r * 0.1, f.type.r * 0.3, f.type.r * 0.15, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,' + (0.4 + sparkAlpha * 0.3) + ')';
+        ctx.lineWidth = 1.5;
+        for (let a = 0; a < 3; a++) {
+          const ang = a * Math.PI / 3;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(ang) * -6, Math.sin(ang) * -6);
+          ctx.lineTo(Math.cos(ang) * 6, Math.sin(ang) * 6);
+          ctx.stroke();
+        }
+      }
+
       if (f.type.leaf) {
         ctx.fillStyle = '#00B894';
         ctx.beginPath();
         ctx.ellipse(4, -f.type.r + 2, 7, 4, 0.3, 0, Math.PI * 2);
         ctx.fill();
-        // Stem
         ctx.strokeStyle = '#00B894';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -358,21 +725,17 @@
       ctx.restore();
     });
 
-    // Bombs
     bombs.forEach(b => {
       ctx.save();
       ctx.translate(b.x, b.y);
       ctx.rotate(b.rotation);
 
-      // Body
       ctx.fillStyle = '#636E72';
       ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 2); ctx.fill();
 
-      // Shine
       ctx.fillStyle = 'rgba(255,255,255,0.15)';
       ctx.beginPath(); ctx.arc(-6, -6, 8, 0, Math.PI * 2); ctx.fill();
 
-      // Fuse
       ctx.strokeStyle = '#B2BEC3';
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -380,14 +743,22 @@
       ctx.quadraticCurveTo(6, -30, 10, -28);
       ctx.stroke();
 
-      // Spark
       const sparkAlpha = 0.5 + 0.5 * Math.sin(Date.now() / 100);
-      ctx.fillStyle = `rgba(255, 165, 0, ${sparkAlpha})`;
+      ctx.fillStyle = 'rgba(255, 165, 0, ' + sparkAlpha + ')';
       ctx.beginPath(); ctx.arc(10, -28, 4, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = `rgba(255, 255, 0, ${sparkAlpha * 0.7})`;
+      ctx.fillStyle = 'rgba(255, 255, 0, ' + (sparkAlpha * 0.7) + ')';
       ctx.beginPath(); ctx.arc(10, -28, 2, 0, Math.PI * 2); ctx.fill();
 
-      // X mark
+      const spAngle = Date.now() / 80;
+      ctx.fillStyle = 'rgba(255,200,0,' + (sparkAlpha * 0.5) + ')';
+      ctx.beginPath();
+      ctx.arc(10 + Math.cos(spAngle) * 3, -28 + Math.sin(spAngle) * 3, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,100,0,' + (sparkAlpha * 0.4) + ')';
+      ctx.beginPath();
+      ctx.arc(10 + Math.cos(spAngle + 2) * 4, -28 + Math.sin(spAngle + 2) * 4, 1, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.strokeStyle = '#E74C3C';
       ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(-8, -8); ctx.lineTo(8, 8); ctx.stroke();
@@ -396,21 +767,18 @@
       ctx.restore();
     });
 
-    // Halves
     halves.forEach(h => {
       ctx.save();
       ctx.translate(h.x, h.y);
       ctx.rotate(h.rotation);
       ctx.globalAlpha = Math.min(1, h.life);
 
-      // Half circle
       ctx.beginPath();
       ctx.arc(0, 0, h.type.r, h.side > 0 ? 0 : Math.PI, h.side > 0 ? Math.PI : Math.PI * 2);
       ctx.closePath();
       ctx.fillStyle = h.type.color;
       ctx.fill();
 
-      // Inner flat face
       ctx.beginPath();
       ctx.arc(0, 0, h.type.r * 0.85, h.side > 0 ? 0 : Math.PI, h.side > 0 ? Math.PI : Math.PI * 2);
       ctx.closePath();
@@ -421,21 +789,39 @@
       ctx.restore();
     });
 
-    // Particles
     particles.forEach(p => {
       ctx.globalAlpha = Math.max(0, p.life);
       ctx.fillStyle = p.color;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+      if (p.sparkle) {
+        const flicker = 0.5 + 0.5 * Math.sin(Date.now() / 60 + p.x);
+        ctx.globalAlpha = Math.max(0, p.life) * flicker;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(Date.now() / 200 + p.y);
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+        ctx.restore();
+      } else {
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+      }
     });
     ctx.globalAlpha = 1;
 
-    // UI - Score
+    renderFreezeOverlay();
+    renderFlash();
+    renderNewBestParticles();
+    renderFloatingTexts();
+
     ctx.fillStyle = 'rgba(44, 62, 80, 0.8)';
     ctx.font = 'bold 32px Arial, sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText(score, 20, 42);
 
-    // Combo
+    if (bestScore > 0 && !newBestTriggered) {
+      ctx.fillStyle = 'rgba(44,62,80,0.35)';
+      ctx.font = '13px Arial, sans-serif';
+      ctx.fillText('Best: ' + bestScore, 22, 62);
+    }
+
     if (combo > 1) {
       ctx.fillStyle = '#E74C3C';
       ctx.font = 'bold 24px Arial, sans-serif';
@@ -448,13 +834,42 @@
       ctx.restore();
     }
 
-    // Misses (lives)
     for (let i = 0; i < maxMisses; i++) {
       ctx.fillStyle = i < misses ? 'rgba(231,76,60,0.3)' : '#E74C3C';
       ctx.font = '20px Arial';
       ctx.textAlign = 'right';
       ctx.fillText('X', W - 15 - i * 25, 38);
     }
+
+    renderMuteButton();
+
+    if (freezeActive) {
+      ctx.fillStyle = '#74B9FF';
+      ctx.font = 'bold 14px Arial, sans-serif';
+      ctx.textAlign = 'left';
+      const barW = 60;
+      const frac = freezeTimer / 3.0;
+      ctx.fillRect(20, H - 30, barW * frac, 8);
+      ctx.strokeStyle = 'rgba(116,185,255,0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(20, H - 30, barW, 8);
+      ctx.fillText('FREEZE', 20, H - 36);
+    }
+
+    if (paused) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 44px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('PAUSED', W / 2, H * 0.4);
+      ctx.font = '20px Arial, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fillText('Press P to resume', W / 2, H * 0.48);
+      ctx.fillText('M to toggle sound', W / 2, H * 0.54);
+    }
+
+    ctx.restore();
   }
 
   function renderTitle() {
@@ -464,7 +879,6 @@
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    // Decorative fruits
     const time = Date.now() / 1000;
     const demoFruits = [
       { x: 100, y: 350 + Math.sin(time) * 20, type: FRUIT_TYPES[0], rot: time },
@@ -482,7 +896,6 @@
       ctx.restore();
     });
 
-    // Diagonal slash
     ctx.save();
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
     ctx.lineWidth = 3;
@@ -511,18 +924,24 @@
     ctx.font = '14px Arial, sans-serif';
     ctx.fillStyle = 'rgba(100,100,100,0.6)';
     ctx.fillText('Swipe to slice, avoid bombs!', W / 2, H * 0.75);
+    ctx.fillText('P = Pause | M = Mute', W / 2, H * 0.79);
 
     if (bestScore > 0) {
       ctx.fillStyle = '#E74C3C';
       ctx.font = '18px Arial, sans-serif';
-      ctx.fillText('Best: ' + bestScore, W / 2, H * 0.82);
+      ctx.fillText('Best: ' + bestScore, W / 2, H * 0.86);
     }
+
+    renderMuteButton();
   }
 
   function renderGameOver() {
+    ctx.save();
+    applyShake();
     render();
+
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(-20, -20, W + 40, H + 40);
 
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 44px Arial, sans-serif';
@@ -534,11 +953,27 @@
     ctx.fillStyle = '#FDCB6E';
     ctx.fillText('Best: ' + bestScore, W / 2, H * 0.50);
 
+    if (newBestTriggered) {
+      const pulse = 1 + 0.1 * Math.sin(Date.now() / 200);
+      ctx.save();
+      ctx.translate(W / 2, H * 0.54);
+      ctx.scale(pulse, pulse);
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 22px Arial, sans-serif';
+      ctx.fillText('NEW BEST!', 0, 0);
+      ctx.restore();
+    }
+
     ctx.fillStyle = '#E74C3C';
-    roundRect(W / 2 - 90, H * 0.57, 180, 50, 25);
+    roundRect(W / 2 - 90, H * 0.60, 180, 50, 25);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 20px Arial, sans-serif';
-    ctx.fillText('Play Again', W / 2, H * 0.57 + 32);
+    ctx.fillText('Play Again', W / 2, H * 0.60 + 32);
+
+    renderNewBestParticles();
+    renderFloatingTexts();
+
+    ctx.restore();
   }
 
   function roundRect(x, y, w, h, r) {
@@ -562,8 +997,10 @@
     requestAnimationFrame(gameLoop);
   }
 
-  // Input
-  canvas.addEventListener('mousedown', e => { onSwipeStart(e); });
+  canvas.addEventListener('mousedown', e => {
+    if (isMuteClick(e)) { toggleMute(); return; }
+    onSwipeStart(e);
+  });
   canvas.addEventListener('mousemove', e => { onSwipeMove(e); });
   canvas.addEventListener('mouseup', () => { onSwipeEnd(); });
   canvas.addEventListener('mouseleave', () => { onSwipeEnd(); });
@@ -571,7 +1008,9 @@
   canvas.addEventListener('touchstart', e => {
     e.preventDefault();
     const t = e.touches[0];
-    onSwipeStart({ clientX: t.clientX, clientY: t.clientY });
+    const fakeEvt = { clientX: t.clientX, clientY: t.clientY };
+    if (isMuteClick(fakeEvt)) { toggleMute(); return; }
+    onSwipeStart(fakeEvt);
   }, { passive: false });
 
   canvas.addEventListener('touchmove', e => {
@@ -581,6 +1020,15 @@
   }, { passive: false });
 
   canvas.addEventListener('touchend', e => { e.preventDefault(); onSwipeEnd(); }, { passive: false });
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'p' || e.key === 'P') {
+      if (state === 'playing') paused = !paused;
+    }
+    if (e.key === 'm' || e.key === 'M') {
+      toggleMute();
+    }
+  });
 
   init();
   requestAnimationFrame(gameLoop);
