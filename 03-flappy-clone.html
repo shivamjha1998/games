@@ -21,7 +21,9 @@
   const W = 400, H = 700;
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
-  canvas.width = W; canvas.height = H;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
 
   function resize() {
     const aspect = W / H;
