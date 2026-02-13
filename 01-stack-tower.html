@@ -9,8 +9,8 @@
   html, body { height: 100%; overflow: hidden; background: #2D3436; touch-action: manipulation; }
   body { display: flex; align-items: center; justify-content: center; }
   canvas { display: block; }
-  .home-link { position: fixed; top: 12px; left: 12px; color: rgba(255,255,255,0.6); text-decoration: none; font-family: sans-serif; font-size: 0.85rem; z-index: 10; }
-  .home-link:hover { color: #fff; }
+  .home-link { position: fixed; top: 12px; left: 12px; color: rgba(255,255,255,0.7); text-decoration: none; font-family: system-ui, sans-serif; font-size: 0.8rem; z-index: 10; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); background: rgba(0,0,0,0.25); padding: 6px 14px; border-radius: 20px; transition: background 0.2s, color 0.2s; }
+  .home-link:hover { color: #fff; background: rgba(0,0,0,0.45); }
 </style>
 </head>
 <body>
@@ -18,6 +18,15 @@
 <canvas id="c"></canvas>
 <script>
 (() => {
+  /**
+   * Stack Tower — Hyper-casual block stacking game
+   * Tap to drop blocks. Align them perfectly to keep building.
+   *
+   * Controls: Tap/Space to drop block, P to pause, M to mute
+   * Rendering: Canvas 2D, 400x700 internal resolution
+   * State machine: title → playing → gameover
+   */
+
   const W = 400, H = 700;
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
@@ -38,42 +47,149 @@
   const BASE_SPEED = 160;
   const DEPTH = 12;
 
-  let state, score, bestScore, blocks, current, fallingPiece, cameraY, targetCamY;
+  // === CONFIGURATION ===
+  // Difficulty
+  const SPEED_LOG_FACTOR = 60;             // logarithmic speed ramp: BASE_SPEED + factor * log2(score+1)
+  const MAX_BLOCK_WIDTH = 200;             // maximum block width (also starting width)
+  const PERFECT_GROWTH_SMALL = 2;          // block width growth on perfect (streak < 3)
+  const PERFECT_GROWTH_LARGE = 4;          // block width growth on perfect (streak >= 3)
+  const PERFECT_STREAK_THRESHOLD = 3;      // streak count to trigger large growth
+  const MILESTONE_INTERVAL = 10;           // score interval between milestones
+
+  // Physics
+  const FALLING_GRAVITY = 800;             // gravity for falling sliced pieces (px/s^2)
+  const CAMERA_LERP = 0.08;               // camera follow smoothing factor
+  const CAMERA_TARGET_OFFSET = 0.6;        // fraction of H for camera target offset
+
+  // Particles
+  const PARTICLE_GRAVITY = 300;            // gravity for particles (px/s^2)
+  const PARTICLE_DECAY = 2;               // particle life decay rate per second
+  const PERFECT_PARTICLE_COUNT = 20;       // particles spawned on perfect placement
+  const MILESTONE_PARTICLE_COUNT = 25;     // particles spawned on milestone
+  const NEW_BEST_PARTICLE_COUNT = 30;      // particles spawned on new best score
+
+  // Screen effects
+  const SHAKE_THRESHOLD = 0.5;            // minimum shake magnitude before zeroing out
+  const SHAKE_DECAY = 0.85;               // shake magnitude multiplier per frame
+  const FLASH_DECAY = 2;                  // flash alpha decay rate per second
+  const FLOATING_TEXT_SPEED = -80;         // floating text vertical speed (px/s)
+  const FLOATING_TEXT_DECAY = 1.5;         // floating text life decay rate per second
+  const DEATH_SHAKE_MAG = 12;             // screen shake on missed block
+  const SLICE_SHAKE_MAG = 4;              // screen shake on imperfect placement
+
+  // Transitions
+  const TRANSITION_DURATION = 0.3;         // fade-in transition duration (seconds)
+  const SLOW_MOTION_FACTOR = 0.25;         // time scale during slow-motion death
+  const SLOW_MOTION_DURATION = 0.5;        // slow-motion death duration (seconds)
+  const GAME_OVER_FADE_SPEED = 3;          // game-over overlay fade-in speed
+
+  // Clouds
+  const CLOUD_COUNT = 8;                   // number of parallax clouds
+  const CLOUD_MIN_WIDTH = 60;              // minimum cloud width
+  const CLOUD_WIDTH_RANGE = 80;            // additional random cloud width
+  const CLOUD_MIN_SPEED = 8;              // minimum cloud drift speed
+  const CLOUD_SPEED_RANGE = 15;            // additional random cloud speed
+
+  // Audio
+  const AUDIO_FADEOUT = 0.001;             // exponentialRamp target for audio fadeout
+
+  let state, score, bestScore, blocks, current, fallingPieces, cameraY, targetCamY;
   let particles, lastTime, perfectStreak;
   let paused, muted, shakeX, shakeY, shakeMag, flashAlpha, flashColor;
-  let floatingTexts, newBestShown, milestoneNext;
+  let floatingTexts, newBestShown, milestoneNext, clouds;
 
-  // --- Web Audio Sound System ---
+  // === SCREEN TRANSITION VARIABLES ===
+  let transitionAlpha = 0;      // fade-in overlay alpha (1 = black, 0 = clear)
+  let transitionTimer = 0;       // countdown timer for transitions
+  let slowMotion = false;        // whether slow-mo death is active
+  let slowMotionTimer = 0;       // time remaining in slow-mo
+  let gameOverFade = 0;          // game-over overlay fade progress (0 to 1)
+  let gameOverFading = false;    // whether game-over is fading in
+
+  // === AUDIO ENGINE ===
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   let actx;
-  function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
-  function tone(freq, dur, type, vol) { if (!actx || muted) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
-  function sweep(f1, f2, dur, type, vol) { if (!actx || muted) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
-  function noise(dur, vol) { if (!actx || muted) return; const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = buf; g.gain.setValueAtTime(vol || 0.15, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); s.connect(g); g.connect(actx.destination); s.start(); }
+
+  function initAudio() {
+    if (!actx) actx = new AudioCtx();
+    if (actx.state === 'suspended') actx.resume();
+  }
+
+  function tone(freq, dur, type, vol) {
+    if (!actx || muted) return;
+    const o = actx.createOscillator();
+    const g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, actx.currentTime);
+    g.gain.setValueAtTime(vol || 0.3, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+    o.connect(g);
+    g.connect(actx.destination);
+    o.start();
+    o.stop(actx.currentTime + dur);
+  }
+
+  function sweep(f1, f2, dur, type, vol) {
+    if (!actx || muted) return;
+    const o = actx.createOscillator();
+    const g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(f1, actx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.3, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+    o.connect(g);
+    g.connect(actx.destination);
+    o.start();
+    o.stop(actx.currentTime + dur);
+  }
+
+  function noise(dur, vol) {
+    if (!actx || muted) return;
+    const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const s = actx.createBufferSource();
+    const g = actx.createGain();
+    s.buffer = buf;
+    g.gain.setValueAtTime(vol || 0.15, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+    s.connect(g);
+    g.connect(actx.destination);
+    s.start();
+  }
+
+  // === SOUND EFFECTS ===
+  // Block placed on the stack
   function sndPlace() { tone(800, 0.08, 'square', 0.2); }
+  // Perfect alignment — ascending triad
   function sndPerfect() { tone(523, 0.1, 'sine', 0.3); setTimeout(() => tone(659, 0.1, 'sine', 0.3), 80); setTimeout(() => tone(784, 0.15, 'sine', 0.3), 160); }
+  // Overhang sliced off
   function sndSlice() { noise(0.08, 0.2); tone(300, 0.1, 'square', 0.15); }
+  // Tower collapsed
   function sndGameOver() { sweep(400, 100, 0.5, 'sawtooth', 0.25); }
+  // Score milestone reached
   function sndMilestone() { tone(523, 0.08, 'sine', 0.25); setTimeout(() => tone(659, 0.08, 'sine', 0.25), 80); setTimeout(() => tone(784, 0.08, 'sine', 0.25), 160); setTimeout(() => tone(1047, 0.15, 'sine', 0.3), 240); }
+  // New personal best
   function sndNewBest() { [523,659,784,1047].forEach((f,i) => setTimeout(() => tone(f, 0.12, 'sine', 0.3), i * 100)); }
 
   // Screen shake
   function triggerShake(mag) { shakeMag = mag; }
   function updateShake(dt) {
-    if (shakeMag > 0.5) {
+    if (shakeMag > SHAKE_THRESHOLD) {
       shakeX = (Math.random() - 0.5) * shakeMag;
       shakeY = (Math.random() - 0.5) * shakeMag;
-      shakeMag *= 0.85;
+      shakeMag *= SHAKE_DECAY;
     } else { shakeX = shakeY = shakeMag = 0; }
   }
 
   // Screen flash
   function triggerFlash(color) { flashColor = color; flashAlpha = 0.4; }
-  function updateFlash(dt) { if (flashAlpha > 0) flashAlpha -= dt * 2; }
+  function updateFlash(dt) { if (flashAlpha > 0) flashAlpha -= dt * FLASH_DECAY; }
 
   // Floating text
   function addFloatingText(text, x, y, color, size) {
-    floatingTexts.push({ text, x, y, vy: -80, life: 1, color: color || '#fff', size: size || 24 });
+    floatingTexts.push({ text, x, y, vy: FLOATING_TEXT_SPEED, life: 1, color: color || '#fff', size: size || 24 });
   }
 
   function hslColor(index) {
@@ -97,21 +213,35 @@
     lastTime = 0;
     cameraY = 0;
     targetCamY = 0;
-    fallingPiece = null;
+    fallingPieces = [];
     paused = false;
     shakeX = shakeY = shakeMag = 0;
     flashAlpha = 0;
     newBestShown = false;
-    milestoneNext = 10;
+    milestoneNext = MILESTONE_INTERVAL;
 
-    blocks = [{ x: W / 2 - 100, w: 200, y: 0, color: hslColor(0) }];
+    // Generate parallax clouds
+    clouds = [];
+    for (let i = 0; i < CLOUD_COUNT; i++) {
+      clouds.push({
+        x: Math.random() * W,
+        y: Math.random() * H * 3 - H,
+        w: CLOUD_MIN_WIDTH + Math.random() * CLOUD_WIDTH_RANGE,
+        h: 20 + Math.random() * 15,
+        speed: CLOUD_MIN_SPEED + Math.random() * CLOUD_SPEED_RANGE,
+        alpha: 0.15 + Math.random() * 0.2,
+        layer: Math.floor(Math.random() * 3)
+      });
+    }
+
+    blocks = [{ x: W / 2 - MAX_BLOCK_WIDTH / 2, w: MAX_BLOCK_WIDTH, y: 0, color: hslColor(0) }];
     spawnBlock();
   }
 
   function spawnBlock() {
     const prev = blocks[blocks.length - 1];
     const y = blocks.length;
-    const speed = BASE_SPEED + score * 4;
+    const speed = BASE_SPEED + SPEED_LOG_FACTOR * Math.log2(score + 1);
     current = {
       x: -prev.w,
       w: prev.w,
@@ -123,9 +253,10 @@
   }
 
   function tap() {
-    if (state === 'title') { initAudio(); state = 'playing'; return; }
+    if (state === 'title') { initAudio(); state = 'playing'; transitionAlpha = 1; transitionTimer = TRANSITION_DURATION; return; }
     if (state === 'gameover') { init(); return; }
     if (paused) return;
+    if (slowMotion) return;
     if (state !== 'playing') return;
 
     const prev = blocks[blocks.length - 1];
@@ -139,9 +270,9 @@
     const overlapW = overlapEnd - overlapStart;
 
     if (overlapW <= 0) {
-      fallingPiece = { x: cx, w: cw, y: current.y, vy: 0, rotation: 0, color: current.color };
+      fallingPieces.push({ x: cx, w: cw, y: current.y, vy: 0, rotation: 0, color: current.color, rotSpeed: (Math.random() - 0.5) * 5 });
       sndGameOver();
-      triggerShake(12);
+      triggerShake(DEATH_SHAKE_MAG);
       triggerFlash('rgba(231,76,60,');
       die();
       return;
@@ -152,26 +283,28 @@
     if (isPerfect) {
       perfectStreak++;
       sndPerfect();
-      blocks.push({ x: px, w: pw, y: current.y, color: current.color });
-      current.w = pw;
+      // Perfect streak rewards: widen block back toward max width
+      const growthW = Math.min(MAX_BLOCK_WIDTH, pw + (perfectStreak >= PERFECT_STREAK_THRESHOLD ? PERFECT_GROWTH_LARGE : PERFECT_GROWTH_SMALL));
+      blocks.push({ x: px - (growthW - pw) / 2, w: growthW, y: current.y, color: current.color });
+      current.w = growthW;
       triggerFlash('rgba(253,203,110,');
 
       const bx = px + pw / 2;
       const by = current.y;
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < PERFECT_PARTICLE_COUNT; i++) {
         const a = Math.random() * Math.PI * 2;
         const sp = 100 + Math.random() * 250;
         particles.push({ x: bx, y: by * BLOCK_H, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 100, life: 1, color: '#FDCB6E', size: 3 + Math.random() * 5 });
       }
 
       addFloatingText('PERFECT!', W / 2, H * 0.4, '#FDCB6E', 28);
-      if (perfectStreak >= 3) {
+      if (perfectStreak >= PERFECT_STREAK_THRESHOLD) {
         addFloatingText(perfectStreak + 'x STREAK!', W / 2, H * 0.48, '#FF6B6B', 22);
       }
     } else {
       perfectStreak = 0;
       sndSlice();
-      triggerShake(4);
+      triggerShake(SLICE_SHAKE_MAG);
 
       let sliceX, sliceW;
       if (cx < px) {
@@ -180,7 +313,7 @@
         sliceX = px + pw; sliceW = (cx + cw) - (px + pw);
       }
       if (sliceW > 0) {
-        fallingPiece = { x: sliceX, w: sliceW, y: current.y, vy: 0, rotation: 0, color: current.color, rotSpeed: (Math.random() - 0.5) * 5 };
+        fallingPieces.push({ x: sliceX, w: sliceW, y: current.y, vy: 0, rotation: 0, color: current.color, rotSpeed: (Math.random() - 0.5) * 5 });
       }
       blocks.push({ x: overlapStart, w: overlapW, y: current.y, color: current.color });
     }
@@ -191,12 +324,12 @@
     if (score >= milestoneNext) {
       sndMilestone();
       addFloatingText('MILESTONE ' + milestoneNext + '!', W / 2, H * 0.35, '#74b9ff', 26);
-      for (let i = 0; i < 25; i++) {
+      for (let i = 0; i < MILESTONE_PARTICLE_COUNT; i++) {
         const a = Math.random() * Math.PI * 2;
         const sp = 80 + Math.random() * 200;
         particles.push({ x: W / 2, y: H * 0.35, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1.5, color: ['#74b9ff','#a29bfe','#FDCB6E','#FF6B6B'][i % 4], size: 3 + Math.random() * 4 });
       }
-      milestoneNext += 10;
+      milestoneNext += MILESTONE_INTERVAL;
     }
 
     // New best check
@@ -205,24 +338,49 @@
       sndNewBest();
       addFloatingText('NEW BEST!', W / 2, H * 0.3, '#FDCB6E', 32);
       triggerFlash('rgba(253,203,110,');
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < NEW_BEST_PARTICLE_COUNT; i++) {
         const a = Math.random() * Math.PI * 2;
         const sp = 100 + Math.random() * 250;
         particles.push({ x: W / 2, y: H * 0.3, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 2, color: '#FDCB6E', size: 3 + Math.random() * 5 });
       }
     }
 
-    targetCamY = blocks.length * BLOCK_H - H * 0.6;
+    targetCamY = blocks.length * BLOCK_H - H * CAMERA_TARGET_OFFSET;
     spawnBlock();
   }
 
   function die() {
-    state = 'gameover';
+    slowMotion = true;
+    slowMotionTimer = SLOW_MOTION_DURATION;
     bestScore = Math.max(score, bestScore);
     localStorage.setItem('stacktower_best', bestScore);
   }
 
   function update(dt) {
+    // Handle slow-motion death
+    if (slowMotion) {
+      dt *= SLOW_MOTION_FACTOR;
+      slowMotionTimer -= dt * (1 / SLOW_MOTION_FACTOR); // Use real time, not slowed time
+      if (slowMotionTimer <= 0) {
+        slowMotion = false;
+        state = 'gameover';
+        gameOverFade = 0;
+        gameOverFading = true;
+      }
+    }
+
+    // Handle fade-in transition
+    if (transitionTimer > 0) {
+      transitionTimer -= dt;
+      transitionAlpha = Math.max(0, transitionTimer / TRANSITION_DURATION);
+    }
+
+    // Handle game-over fade
+    if (gameOverFading) {
+      gameOverFade = Math.min(1, gameOverFade + dt * GAME_OVER_FADE_SPEED);
+      if (gameOverFade >= 1) gameOverFading = false;
+    }
+
     if (paused) return;
     updateShake(dt);
     updateFlash(dt);
@@ -231,7 +389,7 @@
     for (let i = floatingTexts.length - 1; i >= 0; i--) {
       const f = floatingTexts[i];
       f.y += f.vy * dt;
-      f.life -= dt * 1.5;
+      f.life -= dt * FLOATING_TEXT_DECAY;
       if (f.life <= 0) floatingTexts.splice(i, 1);
     }
 
@@ -241,20 +399,28 @@
       if (current.x < 0) { current.dir = 1; current.x = 0; }
     }
 
-    cameraY += (targetCamY - cameraY) * 0.08;
+    cameraY += (targetCamY - cameraY) * CAMERA_LERP;
 
-    if (fallingPiece) {
-      fallingPiece.vy += 800 * dt;
-      fallingPiece.y += fallingPiece.vy * dt / BLOCK_H;
-      fallingPiece.rotation += (fallingPiece.rotSpeed || 2) * dt;
-      if (fallingPiece.y * BLOCK_H - cameraY > H + 100) fallingPiece = null;
+    // Update all falling pieces
+    for (let i = fallingPieces.length - 1; i >= 0; i--) {
+      const fp = fallingPieces[i];
+      fp.vy += FALLING_GRAVITY * dt;
+      fp.y += fp.vy * dt / BLOCK_H;
+      fp.rotation += (fp.rotSpeed || 2) * dt;
+      if (fp.y * BLOCK_H - cameraY > H + 100) fallingPieces.splice(i, 1);
+    }
+
+    // Update clouds
+    for (const c of clouds) {
+      c.x += c.speed * dt;
+      if (c.x > W + c.w) { c.x = -c.w; c.y = cameraY + Math.random() * H * 2 - H * 0.5; }
     }
 
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
       p.x += p.vx * dt; p.y += p.vy * dt;
-      p.vy += 300 * dt;
-      p.life -= dt * 2;
+      p.vy += PARTICLE_GRAVITY * dt;
+      p.life -= dt * PARTICLE_DECAY;
       if (p.life <= 0) particles.splice(i, 1);
     }
   }
@@ -302,21 +468,45 @@
     ctx.fillStyle = grad;
     ctx.fillRect(-10, -10, W + 20, H + 20);
 
+    // Draw parallax clouds
+    for (const c of clouds) {
+      const parallax = 0.3 + c.layer * 0.2;
+      const screenY = c.y - cameraY * parallax;
+      if (screenY < -c.h - 20 || screenY > H + 20) continue;
+      ctx.globalAlpha = c.alpha;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.ellipse(c.x + c.w / 2, screenY, c.w / 2, c.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(c.x + c.w * 0.25, screenY - c.h * 0.15, c.w * 0.3, c.h * 0.45, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(c.x + c.w * 0.7, screenY - c.h * 0.1, c.w * 0.25, c.h * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
     blocks.forEach(b => drawBlock(b.x, b.y, b.w, b.color, true));
 
     if (current && state === 'playing') {
+      // Glow on active block
+      ctx.shadowColor = hslStr(current.color, 20);
+      ctx.shadowBlur = 14;
       drawBlock(current.x, current.y, current.w, current.color, true);
+      ctx.shadowBlur = 0;
     }
 
-    if (fallingPiece) {
+    // Render all falling pieces
+    for (const fp of fallingPieces) {
       ctx.save();
-      const fy = H - BLOCK_H - fallingPiece.y * BLOCK_H + cameraY;
-      const fcx = fallingPiece.x + fallingPiece.w / 2;
+      const fy = H - BLOCK_H - fp.y * BLOCK_H + cameraY;
+      const fcx = fp.x + fp.w / 2;
       ctx.translate(fcx, fy + BLOCK_H / 2);
-      ctx.rotate(fallingPiece.rotation);
-      ctx.globalAlpha = Math.max(0, 1 - fallingPiece.vy / 800);
-      ctx.fillStyle = hslStr(fallingPiece.color, 0);
-      ctx.fillRect(-fallingPiece.w / 2, -BLOCK_H / 2, fallingPiece.w, BLOCK_H);
+      ctx.rotate(fp.rotation);
+      ctx.globalAlpha = Math.max(0, 1 - fp.vy / 800);
+      ctx.fillStyle = hslStr(fp.color, 0);
+      ctx.fillRect(-fp.w / 2, -BLOCK_H / 2, fp.w, BLOCK_H);
       ctx.globalAlpha = 1;
       ctx.restore();
     }
@@ -330,18 +520,18 @@
     });
     ctx.globalAlpha = 1;
 
-    // Score
+    // Score with glow
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.font = 'bold 40px Arial, sans-serif';
+    ctx.font = 'bold 40px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.shadowColor = 'rgba(0,0,0,0.2)';
-    ctx.shadowBlur = 6;
+    ctx.shadowColor = 'rgba(255,255,255,0.5)';
+    ctx.shadowBlur = 12;
     ctx.fillText(score, W / 2, 55);
     ctx.shadowBlur = 0;
 
     if (perfectStreak >= 2 && state === 'playing') {
       ctx.fillStyle = '#FDCB6E';
-      ctx.font = 'bold 20px Arial, sans-serif';
+      ctx.font = 'bold 20px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.fillText('PERFECT x' + perfectStreak, W / 2, 85);
     }
 
@@ -349,7 +539,7 @@
     floatingTexts.forEach(f => {
       ctx.globalAlpha = Math.max(0, f.life);
       ctx.fillStyle = f.color;
-      ctx.font = `bold ${f.size}px Arial, sans-serif`;
+      ctx.font = `bold ${f.size}px "Avenir Next", "Segoe UI", system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.shadowColor = 'rgba(0,0,0,0.3)';
       ctx.shadowBlur = 8;
@@ -361,6 +551,12 @@
     // Screen flash
     if (flashAlpha > 0) {
       ctx.fillStyle = flashColor + flashAlpha + ')';
+      ctx.fillRect(-10, -10, W + 20, H + 20);
+    }
+
+    // Fade-in transition overlay
+    if (transitionAlpha > 0) {
+      ctx.fillStyle = 'rgba(0,0,0,' + transitionAlpha + ')';
       ctx.fillRect(-10, -10, W + 20, H + 20);
     }
 
@@ -378,29 +574,33 @@
     ctx.fillRect(0, 0, W, H);
 
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 48px Arial, sans-serif';
+    ctx.font = 'bold 48px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.shadowColor = 'rgba(0,0,0,0.3)';
     ctx.shadowBlur = 10;
     ctx.fillText('STACK', W / 2, H * 0.30);
-    ctx.font = 'bold 36px Arial, sans-serif';
+    ctx.font = 'bold 36px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillText('TOWER', W / 2, H * 0.38);
     ctx.shadowBlur = 0;
 
     const alpha = 0.5 + 0.5 * Math.sin(Date.now() / 500);
     ctx.globalAlpha = alpha;
-    ctx.font = '22px Arial, sans-serif';
+    ctx.font = '22px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillText('Tap to Play', W / 2, H * 0.52);
     ctx.globalAlpha = 1;
 
-    ctx.font = '14px Arial, sans-serif';
+    ctx.font = '15px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('Tap to drop \u2014 align blocks perfectly!', W / 2, H * 0.57);
+
+    ctx.font = '14px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.fillText('P = Pause  |  M = Mute', W / 2, H * 0.58);
+    ctx.fillText('P = Pause  |  M = Mute', W / 2, H * 0.62);
 
     if (bestScore > 0) {
       ctx.fillStyle = '#FDCB6E';
-      ctx.font = '18px Arial, sans-serif';
-      ctx.fillText('Best: ' + bestScore, W / 2, H * 0.65);
+      ctx.font = '18px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+      ctx.fillText('Best: ' + bestScore, W / 2, H * 0.69);
     }
 
     drawMuteIcon();
@@ -408,31 +608,81 @@
 
   function renderGameOver() {
     render();
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillStyle = 'rgba(0,0,0,' + (0.6 * gameOverFade) + ')';
     ctx.fillRect(0, 0, W, H);
 
+    ctx.globalAlpha = gameOverFade;
+
+    // Tower silhouette on left side
+    const towerHeight = blocks.length;
+    const silX = 30;
+    const silW = 70;
+    const silBlockH = Math.min(6, (H * 0.55) / Math.max(towerHeight, 1));
+    const silBaseY = H * 0.72;
+
+    // Height markers
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.font = '9px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    const markerStep = towerHeight <= 10 ? 1 : towerHeight <= 30 ? 5 : 10;
+    for (let m = markerStep; m <= towerHeight; m += markerStep) {
+      const my = silBaseY - m * silBlockH;
+      if (my < H * 0.08) break;
+      ctx.beginPath();
+      ctx.moveTo(silX - 5, my);
+      ctx.lineTo(silX + silW + 10, my);
+      ctx.stroke();
+      ctx.fillText(m, silX + silW + 14, my + 3);
+    }
+
+    // Draw miniature tower blocks
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i];
+      const ratio = b.w / 200;
+      const bw = silW * ratio;
+      const bx = silX + (silW - bw) / 2;
+      const by = silBaseY - (i + 1) * silBlockH;
+      if (by < H * 0.05) break;
+      ctx.fillStyle = hslStr(b.color, -10);
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(bx, by, bw, silBlockH - 1);
+    }
+    ctx.globalAlpha = 1;
+
+    // Main game-over text (shifted right)
+    const textCX = W / 2 + 25;
+
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.font = 'bold 44px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Game Over', W / 2, H * 0.28);
-    ctx.font = 'bold 64px Arial, sans-serif';
-    ctx.fillText(score, W / 2, H * 0.42);
-    ctx.font = '20px Arial, sans-serif';
+    ctx.fillText('Game Over', textCX, H * 0.28);
+    ctx.font = 'bold 64px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.fillText(score, textCX, H * 0.42);
+
+    // Height stat
+    ctx.font = '18px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText('Height: ' + towerHeight + ' blocks', textCX, H * 0.48);
+
+    ctx.font = '20px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = '#FDCB6E';
-    ctx.fillText('Best: ' + bestScore, W / 2, H * 0.50);
+    ctx.fillText('Best: ' + bestScore, textCX, H * 0.54);
 
     if (score === bestScore && score > 0) {
       ctx.fillStyle = '#FDCB6E';
-      ctx.font = 'bold 18px Arial, sans-serif';
-      ctx.fillText('NEW BEST!', W / 2, H * 0.55);
+      ctx.font = 'bold 18px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+      ctx.fillText('NEW BEST!', textCX, H * 0.59);
     }
 
     ctx.fillStyle = '#6C5CE7';
-    roundRect(W / 2 - 90, H * 0.60, 180, 50, 25);
+    roundRect(textCX - 90, H * 0.63, 180, 50, 25);
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 20px Arial, sans-serif';
-    ctx.fillText('Play Again', W / 2, H * 0.60 + 32);
+    ctx.font = 'bold 20px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.fillText('Play Again', textCX, H * 0.63 + 32);
 
+    ctx.globalAlpha = 1;
     drawMuteIcon();
   }
 
@@ -441,35 +691,81 @@
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.font = 'bold 44px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('PAUSED', W / 2, H * 0.45);
-    ctx.font = '20px Arial, sans-serif';
+    ctx.font = '20px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.fillText('Press P to resume', W / 2, H * 0.52);
   }
 
+  // Mute button constants
+  const MUTE_CX = W - 28, MUTE_CY = 28, MUTE_R = 20;
+  let muteHovered = false;
+
   function drawMuteIcon() {
-    const ix = W - 36, iy = 16, sz = 20;
     ctx.save();
-    ctx.globalAlpha = 0.6;
-    ctx.fillStyle = '#fff'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+
+    // Filled circle background
     ctx.beginPath();
-    ctx.moveTo(ix, iy + 6); ctx.lineTo(ix + 5, iy + 6);
-    ctx.lineTo(ix + 10, iy + 1); ctx.lineTo(ix + 10, iy + sz - 1);
-    ctx.lineTo(ix + 5, iy + sz - 6); ctx.lineTo(ix, iy + sz - 6);
-    ctx.closePath(); ctx.fill();
+    ctx.arc(MUTE_CX, MUTE_CY, MUTE_R, 0, Math.PI * 2);
+    ctx.fillStyle = muteHovered ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.3)';
+    ctx.fill();
+
+    // Speaker body (small rectangle) — shifted left 4px to center in circle
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(MUTE_CX - 12, MUTE_CY - 4, 6, 8);
+
+    // Speaker cone (triangle)
+    ctx.beginPath();
+    ctx.moveTo(MUTE_CX - 6, MUTE_CY - 4);
+    ctx.lineTo(MUTE_CX, MUTE_CY - 9);
+    ctx.lineTo(MUTE_CX, MUTE_CY + 9);
+    ctx.lineTo(MUTE_CX - 6, MUTE_CY + 4);
+    ctx.closePath();
+    ctx.fill();
+
     if (muted) {
-      ctx.strokeStyle = '#ff6666'; ctx.lineWidth = 2.5;
+      // X mark for muted state
+      ctx.strokeStyle = '#ff6b6b';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(ix + 13, iy + 5); ctx.lineTo(ix + 20, iy + sz - 5);
-      ctx.moveTo(ix + 20, iy + 5); ctx.lineTo(ix + 13, iy + sz - 5);
+      ctx.moveTo(MUTE_CX + 3, MUTE_CY - 5);
+      ctx.lineTo(MUTE_CX + 11, MUTE_CY + 5);
+      ctx.moveTo(MUTE_CX + 11, MUTE_CY - 5);
+      ctx.lineTo(MUTE_CX + 3, MUTE_CY + 5);
       ctx.stroke();
     } else {
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(ix + 12, iy + sz / 2, 4, -Math.PI * 0.4, Math.PI * 0.4); ctx.stroke();
-      ctx.beginPath(); ctx.arc(ix + 12, iy + sz / 2, 8, -Math.PI * 0.4, Math.PI * 0.4); ctx.stroke();
+      // Sound wave arcs
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1.8;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(MUTE_CX + 2, MUTE_CY, 5, -Math.PI * 0.35, Math.PI * 0.35);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(MUTE_CX + 2, MUTE_CY, 10, -Math.PI * 0.35, Math.PI * 0.35);
+      ctx.stroke();
     }
+
+    // Tooltip on hover
+    if (muteHovered) {
+      const label = muted ? 'Unmute (M)' : 'Mute (M)';
+      ctx.font = '12px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(label).width + 14;
+      const tx = MUTE_CX;
+      const ty = MUTE_CY + MUTE_R + 14;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.beginPath();
+      ctx.roundRect(tx - tw / 2, ty - 11, tw, 22, 6);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, tx, ty);
+    }
+
     ctx.restore();
   }
 
@@ -504,18 +800,35 @@
     requestAnimationFrame(gameLoop);
   }
 
-  // Mute click area
-  function checkMuteClick(e) {
+  // Mute click area — circle hit test
+  function canvasCoords(e) {
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (W / rect.width);
-    const y = (e.clientY - rect.top) * (H / rect.height);
-    if (x > W - 60 && y < 45) {
+    return {
+      x: (e.clientX - rect.left) * (W / rect.width),
+      y: (e.clientY - rect.top) * (H / rect.height)
+    };
+  }
+  function isInMuteCircle(x, y) {
+    const dx = x - MUTE_CX, dy = y - MUTE_CY;
+    return dx * dx + dy * dy <= (MUTE_R + 4) * (MUTE_R + 4);
+  }
+  function checkMuteClick(e) {
+    const { x, y } = canvasCoords(e);
+    if (isInMuteCircle(x, y)) {
       muted = !muted;
       localStorage.setItem('stacktower_muted', muted);
       return true;
     }
     return false;
   }
+
+  // Hover tracking for tooltip
+  canvas.addEventListener('mousemove', e => {
+    const { x, y } = canvasCoords(e);
+    muteHovered = isInMuteCircle(x, y);
+    canvas.style.cursor = muteHovered ? 'pointer' : 'default';
+  });
+  canvas.addEventListener('mouseleave', () => { muteHovered = false; });
 
   canvas.addEventListener('mousedown', e => { if (!checkMuteClick(e)) tap(); });
   canvas.addEventListener('touchstart', e => {

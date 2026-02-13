@@ -9,8 +9,8 @@
   html, body { height: 100%; overflow: hidden; background: #2D3436; touch-action: manipulation; }
   body { display: flex; align-items: center; justify-content: center; }
   canvas { display: block; }
-  .home-link { position: fixed; top: 12px; left: 12px; color: rgba(255,255,255,0.6); text-decoration: none; font-family: sans-serif; font-size: 0.85rem; z-index: 10; }
-  .home-link:hover { color: #fff; }
+  .home-link { position: fixed; top: 12px; left: 12px; color: rgba(255,255,255,0.7); text-decoration: none; font-family: system-ui, sans-serif; font-size: 0.8rem; z-index: 10; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); background: rgba(0,0,0,0.25); padding: 6px 14px; border-radius: 20px; transition: background 0.2s, color 0.2s; }
+  .home-link:hover { color: #fff; background: rgba(0,0,0,0.45); }
 </style>
 </head>
 <body>
@@ -18,6 +18,15 @@
 <canvas id="c"></canvas>
 <script>
 (() => {
+  /**
+   * Fruit Slice — Swipe-to-slice fruit game
+   * Swipe to slice fruits flying through the air. Avoid the bombs!
+   *
+   * Controls: Swipe/mouse drag to slice, P to pause, M to mute
+   * Rendering: Canvas 2D, 400x700 internal resolution
+   * State machine: title → playing → gameover
+   */
+
   const W = 400, H = 700;
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
@@ -44,6 +53,66 @@
 
   const FREEZE_TYPE = { name: 'freeze', color: '#74B9FF', inner: '#A3D8FF', r: 22, leaf: false, isFreeze: true };
 
+  // === CONFIGURATION ===
+  // Lives
+  const MAX_MISSES = 3;
+  // Combo
+  const COMBO_TIMEOUT = 0.6;
+  const CRITICAL_SLICE_THRESHOLD = 3;
+  // Freeze power-up
+  const FREEZE_DURATION = 3.0;
+  const FREEZE_TIME_SCALE = 0.35;
+  // Spawn timing
+  const SPAWN_INTERVAL_MIN = 1.0;
+  const SPAWN_INTERVAL_BASE = 2.2;
+  const SPAWN_INTERVAL_DECAY = 0.08;
+  const SPAWN_WAVE_DELAY = 150;
+  const BOMB_MIN_WAVE = 3;
+  const BOMB_CHANCE = 0.3;
+  const FREEZE_MIN_WAVE = 5;
+  const FREEZE_CHANCE = 0.12;
+  const MAX_FRUITS_PER_WAVE = 6;
+  const WAVE_COUNT_DIVISOR = 3;
+  // Fruit velocities
+  const FRUIT_VY_BASE = -700;
+  const FRUIT_VY_RANGE = 300;
+  const BOMB_VY_BASE = -750;
+  const BOMB_VY_RANGE = 200;
+  const FREEZE_VY_BASE = -720;
+  const FREEZE_VY_RANGE = 250;
+  const BOMB_RADIUS = 24;
+  // Particles
+  const PARTICLE_GRAVITY = 400;
+  const PARTICLE_DECAY = 2;
+  const SLICE_PARTICLE_COUNT = 18;
+  const FREEZE_PARTICLE_COUNT = 20;
+  const MILESTONE_PARTICLE_COUNT = 25;
+  const CRITICAL_PARTICLE_COUNT = 20;
+  const BOMB_EXPLOSION_COUNT = 40;
+  const BOMB_SMOKE_COUNT = 15;
+  const NEW_BEST_PARTICLE_COUNT = 40;
+  const NEW_BEST_GRAVITY = 300;
+  // Trail
+  const TRAIL_MAX_LENGTH = 20;
+  const TRAIL_DECAY = 4;
+  // Floating text
+  const FLOATING_TEXT_SPEED = -80;
+  // Milestones
+  const MILESTONE_INTERVAL = 25;
+  // Screen effects
+  const FLASH_INITIAL_ALPHA = 0.5;
+  const BOMB_SHAKE_INTENSITY = 12;
+  const BOMB_SHAKE_DURATION = 0.4;
+  const MISS_SHAKE_INTENSITY = 8;
+  const MISS_SHAKE_DURATION = 0.3;
+  // Transitions
+  const TRANSITION_DURATION = 0.3;
+  const SLOW_MOTION_FACTOR = 0.25;
+  const SLOW_MOTION_DURATION = 0.5;
+  const GAME_OVER_FADE_SPEED = 3;
+  // Audio
+  const AUDIO_FADEOUT = 0.001;
+
   let state, score, bestScore, combo, comboTimer, misses, maxMisses;
   let fruits, halves, bombs, particles, trail, spawnTimer, lastTime;
   let waveCount;
@@ -55,55 +124,88 @@
   let lastMilestone;
   let freezeTimer, freezeActive;
   let swipeSliceCount;
+  let totalSlices, bestCombo;
+
+  // --- Screen Transition State ---
+  let transitionAlpha = 0;
+  let transitionTimer = 0;
+  let slowMotion = false;
+  let slowMotionTimer = 0;
+  let gameOverFade = 0;
+  let gameOverFading = false;
 
   // --- Mute ---
   let muted = localStorage.getItem('fruitslice_muted') === 'true';
 
-  // --- Web Audio Sound System ---
+  // === AUDIO ENGINE ===
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   let actx;
-  function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
+
+  function initAudio() {
+    if (!actx) actx = new AudioCtx();
+    if (actx.state === 'suspended') actx.resume();
+  }
 
   function tone(freq, dur, type, vol) {
     if (!actx || muted) return;
-    const o = actx.createOscillator(), g = actx.createGain();
+    const o = actx.createOscillator();
+    const g = actx.createGain();
     o.type = type || 'sine';
     o.frequency.setValueAtTime(freq, actx.currentTime);
     g.gain.setValueAtTime(vol || 0.3, actx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
-    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+    g.gain.exponentialRampToValueAtTime(AUDIO_FADEOUT, actx.currentTime + dur);
+    o.connect(g);
+    g.connect(actx.destination);
+    o.start();
+    o.stop(actx.currentTime + dur);
   }
 
   function sweep(f1, f2, dur, type, vol) {
     if (!actx || muted) return;
-    const o = actx.createOscillator(), g = actx.createGain();
+    const o = actx.createOscillator();
+    const g = actx.createGain();
     o.type = type || 'sine';
     o.frequency.setValueAtTime(f1, actx.currentTime);
     o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur);
     g.gain.setValueAtTime(vol || 0.3, actx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
-    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur);
+    g.gain.exponentialRampToValueAtTime(AUDIO_FADEOUT, actx.currentTime + dur);
+    o.connect(g);
+    g.connect(actx.destination);
+    o.start();
+    o.stop(actx.currentTime + dur);
   }
 
   function noise(dur, vol) {
     if (!actx || muted) return;
     const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    const s = actx.createBufferSource(), g = actx.createGain();
-    s.buffer = buf;
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src = actx.createBufferSource();
+    const g = actx.createGain();
+    src.buffer = buf;
     g.gain.setValueAtTime(vol || 0.15, actx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
-    s.connect(g); g.connect(actx.destination); s.start();
+    g.gain.exponentialRampToValueAtTime(AUDIO_FADEOUT, actx.currentTime + dur);
+    src.connect(g);
+    g.connect(actx.destination);
+    src.start();
   }
 
+  // === SOUND EFFECTS ===
+  // Slice — short noise burst + upward sweep for satisfying cut feel
   function sndSlice() { noise(0.06, 0.25); sweep(800, 1200, 0.08, 'sine', 0.2); }
+  // Bomb — longer noise + downward sawtooth sweep for explosion
   function sndBomb() { noise(0.3, 0.35); sweep(200, 50, 0.4, 'sawtooth', 0.3); }
+  // Combo — ascending three-tone arpeggio
   function sndCombo() { tone(660, 0.08, 'sine', 0.2); setTimeout(() => tone(880, 0.08, 'sine', 0.2), 60); setTimeout(() => tone(1100, 0.1, 'sine', 0.25), 120); }
+  // Miss — descending sweep for a missed fruit
   function sndMiss() { sweep(300, 150, 0.2, 'sine', 0.15); }
+  // Freeze — two high tones for activating freeze power-up
   function sndFreeze() { tone(1200, 0.15, 'sine', 0.2); setTimeout(() => tone(1600, 0.2, 'sine', 0.15), 80); }
+  // Critical — four-note rising arpeggio for critical slice
   function sndCritical() { tone(880, 0.06, 'sine', 0.2); setTimeout(() => tone(1100, 0.06, 'sine', 0.2), 50); setTimeout(() => tone(1320, 0.06, 'sine', 0.2), 100); setTimeout(() => tone(1760, 0.12, 'sine', 0.3), 150); }
+  // Milestone — four-note fanfare for score milestones
   function sndMilestone() { tone(523, 0.1, 'sine', 0.2); setTimeout(() => tone(659, 0.1, 'sine', 0.2), 80); setTimeout(() => tone(784, 0.1, 'sine', 0.2), 160); setTimeout(() => tone(1047, 0.15, 'sine', 0.25), 240); }
+  // New Best — five-note ascending fanfare for new high score
   function sndNewBest() { [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => tone(f, 0.15, 'sine', 0.25), i * 100)); }
 
   // --- Screen Shake ---
@@ -116,19 +218,19 @@
   // --- Screen Flash ---
   function triggerFlash(color, duration) {
     flashColor = color;
-    flashAlpha = 0.5;
+    flashAlpha = FLASH_INITIAL_ALPHA;
     flashDuration = duration;
     flashTimer = duration;
   }
 
   // --- Floating Text ---
   function addFloatingText(x, y, text, color, size, duration) {
-    floatingTexts.push({ x, y, text, color, size: size || 22, life: duration || 1.0, maxLife: duration || 1.0, vy: -80 });
+    floatingTexts.push({ x, y, text, color, size: size || 22, life: duration || 1.0, maxLife: duration || 1.0, vy: FLOATING_TEXT_SPEED });
   }
 
   // --- New Best Particles ---
   function spawnNewBestParticles() {
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < NEW_BEST_PARTICLE_COUNT; i++) {
       const a = Math.random() * Math.PI * 2;
       const sp = 60 + Math.random() * 180;
       newBestParticles.push({
@@ -146,7 +248,7 @@
     combo = 0;
     comboTimer = 0;
     misses = 0;
-    maxMisses = 3;
+    maxMisses = MAX_MISSES;
     bestScore = parseInt(localStorage.getItem('fruitslice_best') || '0');
     fruits = [];
     halves = [];
@@ -171,18 +273,26 @@
     freezeTimer = 0;
     freezeActive = false;
     swipeSliceCount = 0;
+    totalSlices = 0;
+    bestCombo = 0;
+    transitionAlpha = 0;
+    transitionTimer = 0;
+    slowMotion = false;
+    slowMotionTimer = 0;
+    gameOverFade = 0;
+    gameOverFading = false;
   }
 
   function tap() {
-    if (state === 'title') { initAudio(); state = 'playing'; return; }
+    if (state === 'title') { initAudio(); state = 'playing'; transitionAlpha = 1; transitionTimer = TRANSITION_DURATION; return; }
     if (state === 'gameover') { init(); return; }
   }
 
   function spawnWave() {
     waveCount++;
-    const count = Math.min(2 + Math.floor(waveCount / 3), 6);
-    const hasBomb = waveCount > 3 && Math.random() < 0.3;
-    const hasFreeze = waveCount > 5 && Math.random() < 0.12;
+    const count = Math.min(2 + Math.floor(waveCount / WAVE_COUNT_DIVISOR), MAX_FRUITS_PER_WAVE);
+    const hasBomb = waveCount > BOMB_MIN_WAVE && Math.random() < BOMB_CHANCE;
+    const hasFreeze = waveCount > FREEZE_MIN_WAVE && Math.random() < FREEZE_CHANCE;
 
     for (let i = 0; i < count; i++) {
       setTimeout(() => {
@@ -190,14 +300,14 @@
         const ft = FRUIT_TYPES[Math.floor(Math.random() * FRUIT_TYPES.length)];
         const x = 40 + Math.random() * (W - 80);
         const vx = (W / 2 - x) * (0.3 + Math.random() * 0.5);
-        const vy = -700 - Math.random() * 300;
+        const vy = FRUIT_VY_BASE - Math.random() * FRUIT_VY_RANGE;
         fruits.push({
           x, y: H + 30, vx, vy,
           rotation: Math.random() * Math.PI * 2,
           rotSpeed: (Math.random() - 0.5) * 6,
           type: ft, sliced: false
         });
-      }, i * 150);
+      }, i * SPAWN_WAVE_DELAY);
     }
 
     if (hasBomb) {
@@ -206,10 +316,10 @@
         const x = 60 + Math.random() * (W - 120);
         const vx = (W / 2 - x) * 0.4;
         bombs.push({
-          x, y: H + 30, vx, vy: -750 - Math.random() * 200,
+          x, y: H + 30, vx, vy: BOMB_VY_BASE - Math.random() * BOMB_VY_RANGE,
           rotation: 0, rotSpeed: 3
         });
-      }, Math.random() * count * 150);
+      }, Math.random() * count * SPAWN_WAVE_DELAY);
     }
 
     if (hasFreeze) {
@@ -218,12 +328,12 @@
         const x = 50 + Math.random() * (W - 100);
         const vx = (W / 2 - x) * 0.4;
         fruits.push({
-          x, y: H + 30, vx, vy: -720 - Math.random() * 250,
+          x, y: H + 30, vx, vy: FREEZE_VY_BASE - Math.random() * FREEZE_VY_RANGE,
           rotation: Math.random() * Math.PI * 2,
           rotSpeed: (Math.random() - 0.5) * 4,
           type: FREEZE_TYPE, sliced: false
         });
-      }, Math.random() * count * 150);
+      }, Math.random() * count * SPAWN_WAVE_DELAY);
     }
   }
 
@@ -231,16 +341,19 @@
     fruit.sliced = true;
     score++;
     combo++;
-    comboTimer = 0.6;
+    comboTimer = COMBO_TIMEOUT;
     swipeSliceCount++;
+    totalSlices++;
+    if (combo > bestCombo) bestCombo = combo;
 
     if (fruit.type.isFreeze) {
       sndFreeze();
-      freezeTimer = 3.0;
+      freezeTimer = FREEZE_DURATION;
       freezeActive = true;
-      addFloatingText(fruit.x, fruit.y, 'FREEZE!', '#74B9FF', 26, 1.2);
-      triggerFlash('rgba(116,185,255,0.3)', 0.4);
-      for (let i = 0; i < 20; i++) {
+      addFloatingText(W / 2, H * 0.35, 'FROZEN!', '#A3D8FF', 40, 2.0);
+      addFloatingText(W / 2, H * 0.42, '\u2744 \u2744 \u2744', '#DFE6FF', 22, 1.6);
+      triggerFlash('rgba(116,185,255,0.4)', 0.6);
+      for (let i = 0; i < FREEZE_PARTICLE_COUNT; i++) {
         const a = Math.random() * Math.PI * 2;
         const sp = 60 + Math.random() * 120;
         particles.push({
@@ -262,13 +375,13 @@
     addFloatingText(fruit.x + 15, fruit.y - 15, '+1', '#fff', 18, 0.7);
 
     // Milestone every 25 points
-    const newMilestone = Math.floor(score / 25);
+    const newMilestone = Math.floor(score / MILESTONE_INTERVAL);
     if (newMilestone > lastMilestone) {
       lastMilestone = newMilestone;
       sndMilestone();
       addFloatingText(W / 2, H * 0.35, score + ' POINTS!', '#FDCB6E', 32, 1.5);
       triggerFlash('rgba(253,203,110,0.25)', 0.5);
-      for (let i = 0; i < 25; i++) {
+      for (let i = 0; i < MILESTONE_PARTICLE_COUNT; i++) {
         const a = Math.random() * Math.PI * 2;
         const sp = 80 + Math.random() * 160;
         particles.push({
@@ -305,7 +418,7 @@
 
     // Enhanced juice particles
     const color = fruit.type.color;
-    const pCount = fruit.type.isFreeze ? 15 : 18;
+    const pCount = fruit.type.isFreeze ? 15 : SLICE_PARTICLE_COUNT;
     for (let i = 0; i < pCount; i++) {
       const a = Math.random() * Math.PI * 2;
       const sp = 80 + Math.random() * 200;
@@ -330,13 +443,13 @@
   }
 
   function checkCriticalSlice() {
-    if (swipeSliceCount >= 3) {
+    if (swipeSliceCount >= CRITICAL_SLICE_THRESHOLD) {
       const bonus = swipeSliceCount;
       score += bonus;
       sndCritical();
       addFloatingText(W / 2, H * 0.45, 'CRITICAL x' + swipeSliceCount + '! +' + bonus, '#FF6348', 28, 1.5);
       triggerFlash('rgba(255,99,72,0.2)', 0.3);
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < CRITICAL_PARTICLE_COUNT; i++) {
         const a = Math.random() * Math.PI * 2;
         const sp = 100 + Math.random() * 150;
         particles.push({
@@ -350,15 +463,17 @@
   }
 
   function hitBomb(bx, by) {
+    if (slowMotion) return; // prevent double-death during slow-motion
     sndBomb();
-    triggerShake(12, 0.4);
+    triggerShake(BOMB_SHAKE_INTENSITY, BOMB_SHAKE_DURATION);
     triggerFlash('rgba(231,76,60,0.4)', 0.3);
-    state = 'gameover';
+    slowMotion = true;
+    slowMotionTimer = SLOW_MOTION_DURATION;
     bestScore = Math.max(score, bestScore);
     localStorage.setItem('fruitslice_best', bestScore);
 
     const cx = bx || W / 2, cy = by || H / 2;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < BOMB_EXPLOSION_COUNT; i++) {
       const a = Math.random() * Math.PI * 2;
       const sp = 100 + Math.random() * 300;
       const colors = ['#E74C3C', '#FF6348', '#FF9F43', '#FFD700', '#636E72'];
@@ -370,7 +485,7 @@
         size: 3 + Math.random() * 8
       });
     }
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < BOMB_SMOKE_COUNT; i++) {
       const a = Math.random() * Math.PI * 2;
       const sp = 30 + Math.random() * 80;
       particles.push({
@@ -382,9 +497,11 @@
   }
 
   function handleMissDeath() {
-    triggerShake(8, 0.3);
+    if (slowMotion) return; // prevent double-death during slow-motion
+    triggerShake(MISS_SHAKE_INTENSITY, MISS_SHAKE_DURATION);
     triggerFlash('rgba(231,76,60,0.3)', 0.25);
-    state = 'gameover';
+    slowMotion = true;
+    slowMotionTimer = SLOW_MOTION_DURATION;
     bestScore = Math.max(score, bestScore);
     localStorage.setItem('fruitslice_best', bestScore);
   }
@@ -418,7 +535,7 @@
     if (!swiping || state !== 'playing' || paused) return;
     const pos = getPos(e);
     trail.push({ ...pos, life: 1 });
-    if (trail.length > 20) trail.shift();
+    if (trail.length > TRAIL_MAX_LENGTH) trail.shift();
 
     if (Math.random() < 0.4) {
       particles.push({
@@ -438,7 +555,7 @@
         }
       }
       for (const b of bombs) {
-        if (circleLineIntersect(b.x, b.y, 24, swipePrev.x, swipePrev.y, pos.x, pos.y)) {
+        if (circleLineIntersect(b.x, b.y, BOMB_RADIUS, swipePrev.x, swipePrev.y, pos.x, pos.y)) {
           hitBomb(b.x, b.y); return;
         }
       }
@@ -465,10 +582,33 @@
 
   function isMuteClick(e) {
     const pos = getPos(e);
-    return pos.x >= W - 50 && pos.x <= W - 10 && pos.y >= 55 && pos.y <= 85;
+    const dx = pos.x - MUTE_CX, dy = pos.y - MUTE_CY;
+    return dx * dx + dy * dy <= (MUTE_R + 4) * (MUTE_R + 4);
   }
 
   function update(dt) {
+    // --- Screen Transition Logic ---
+    if (slowMotion) {
+      dt *= SLOW_MOTION_FACTOR;
+      slowMotionTimer -= dt * (1 / SLOW_MOTION_FACTOR); // decrement in real time
+      if (slowMotionTimer <= 0) {
+        slowMotion = false;
+        state = 'gameover';
+        gameOverFade = 0;
+        gameOverFading = true;
+      }
+    }
+
+    if (transitionTimer > 0) {
+      transitionTimer -= dt;
+      transitionAlpha = Math.max(0, transitionTimer / TRANSITION_DURATION);
+    }
+
+    if (gameOverFading) {
+      gameOverFade = Math.min(1, gameOverFade + dt * GAME_OVER_FADE_SPEED);
+      if (gameOverFade >= 1) gameOverFading = false;
+    }
+
     if (shakeTimer > 0) {
       shakeTimer -= dt;
       if (shakeTimer < 0) shakeTimer = 0;
@@ -490,7 +630,7 @@
     for (let i = newBestParticles.length - 1; i >= 0; i--) {
       const p = newBestParticles[i];
       p.x += p.vx * dt; p.y += p.vy * dt;
-      p.vy += 300 * dt;
+      p.vy += NEW_BEST_GRAVITY * dt;
       p.life -= dt;
       if (p.life <= 0) newBestParticles.splice(i, 1);
     }
@@ -498,7 +638,7 @@
     if (state !== 'playing') return;
     if (paused) return;
 
-    const timeScale = freezeActive ? 0.35 : 1.0;
+    const timeScale = freezeActive ? FREEZE_TIME_SCALE : 1.0;
     if (freezeActive) {
       freezeTimer -= dt;
       if (freezeTimer <= 0) { freezeActive = false; freezeTimer = 0; }
@@ -508,7 +648,7 @@
     spawnTimer -= dt;
     if (spawnTimer <= 0) {
       spawnWave();
-      spawnTimer = Math.max(1.0, 2.2 - waveCount * 0.08);
+      spawnTimer = Math.max(SPAWN_INTERVAL_MIN, SPAWN_INTERVAL_BASE - waveCount * SPAWN_INTERVAL_DECAY);
     }
 
     for (let i = fruits.length - 1; i >= 0; i--) {
@@ -552,13 +692,13 @@
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
       p.x += p.vx * dt; p.y += p.vy * dt;
-      p.vy += 400 * dt;
-      p.life -= dt * 2;
+      p.vy += PARTICLE_GRAVITY * dt;
+      p.life -= dt * PARTICLE_DECAY;
       if (p.life <= 0) particles.splice(i, 1);
     }
 
     for (let i = trail.length - 1; i >= 0; i--) {
-      trail[i].life -= dt * 4;
+      trail[i].life -= dt * TRAIL_DECAY;
       if (trail[i].life <= 0) trail.splice(i, 1);
     }
 
@@ -594,7 +734,7 @@
       ctx.save();
       ctx.globalAlpha = Math.max(0, alpha);
       ctx.fillStyle = ft.color;
-      ctx.font = 'bold ' + ft.size + 'px Arial, sans-serif';
+      ctx.font = 'bold ' + ft.size + 'px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.shadowColor = 'rgba(0,0,0,0.5)';
       ctx.shadowBlur = 4;
@@ -614,26 +754,45 @@
     ctx.globalAlpha = 1;
   }
 
+  // Mute button constants
+  const MUTE_CX = W - 28, MUTE_CY = 67, MUTE_R = 20;
+  let muteHovered = false;
+
   function renderMuteButton() {
-    const ix = W - 40, iy = 57, sz = 20;
     ctx.save();
-    ctx.globalAlpha = 0.6;
-    ctx.fillStyle = '#2C3E50'; ctx.strokeStyle = '#2C3E50'; ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(ix, iy + 6); ctx.lineTo(ix + 5, iy + 6);
-    ctx.lineTo(ix + 10, iy + 1); ctx.lineTo(ix + 10, iy + sz - 1);
-    ctx.lineTo(ix + 5, iy + sz - 6); ctx.lineTo(ix, iy + sz - 6);
-    ctx.closePath(); ctx.fill();
+    ctx.arc(MUTE_CX, MUTE_CY, MUTE_R, 0, Math.PI * 2);
+    ctx.fillStyle = muteHovered ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.1)';
+    ctx.fill();
+    ctx.fillStyle = '#2C3E50';
+    ctx.fillRect(MUTE_CX - 12, MUTE_CY - 4, 6, 8);
+    ctx.beginPath();
+    ctx.moveTo(MUTE_CX - 6, MUTE_CY - 4);
+    ctx.lineTo(MUTE_CX, MUTE_CY - 9);
+    ctx.lineTo(MUTE_CX, MUTE_CY + 9);
+    ctx.lineTo(MUTE_CX - 6, MUTE_CY + 4);
+    ctx.closePath();
+    ctx.fill();
     if (muted) {
-      ctx.strokeStyle = '#E74C3C'; ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#E74C3C'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(ix + 13, iy + 5); ctx.lineTo(ix + 20, iy + sz - 5);
-      ctx.moveTo(ix + 20, iy + 5); ctx.lineTo(ix + 13, iy + sz - 5);
+      ctx.moveTo(MUTE_CX + 3, MUTE_CY - 5); ctx.lineTo(MUTE_CX + 11, MUTE_CY + 5);
+      ctx.moveTo(MUTE_CX + 11, MUTE_CY - 5); ctx.lineTo(MUTE_CX + 3, MUTE_CY + 5);
       ctx.stroke();
     } else {
-      ctx.strokeStyle = '#2C3E50'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(ix + 12, iy + sz / 2, 4, -Math.PI * 0.4, Math.PI * 0.4); ctx.stroke();
-      ctx.beginPath(); ctx.arc(ix + 12, iy + sz / 2, 8, -Math.PI * 0.4, Math.PI * 0.4); ctx.stroke();
+      ctx.strokeStyle = 'rgba(44,62,80,0.7)'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(MUTE_CX + 2, MUTE_CY, 5, -Math.PI * 0.35, Math.PI * 0.35); ctx.stroke();
+      ctx.beginPath(); ctx.arc(MUTE_CX + 2, MUTE_CY, 10, -Math.PI * 0.35, Math.PI * 0.35); ctx.stroke();
+    }
+    if (muteHovered) {
+      const label = muted ? 'Unmute (M)' : 'Mute (M)';
+      ctx.font = '12px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(label).width + 14;
+      const ty = MUTE_CY + MUTE_R + 14;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.beginPath(); ctx.roundRect(MUTE_CX - tw / 2, ty - 11, tw, 22, 6); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.fillText(label, MUTE_CX, ty);
     }
     ctx.restore();
   }
@@ -813,20 +972,25 @@
     renderNewBestParticles();
     renderFloatingTexts();
 
+    ctx.save();
     ctx.fillStyle = 'rgba(44, 62, 80, 0.8)';
-    ctx.font = 'bold 32px Arial, sans-serif';
+    ctx.font = 'bold 32px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'left';
+    ctx.shadowColor = 'rgba(253, 203, 110, 0.6)';
+    ctx.shadowBlur = 12;
     ctx.fillText(score, 20, 42);
+    ctx.shadowBlur = 0;
+    ctx.restore();
 
     if (bestScore > 0 && !newBestTriggered) {
       ctx.fillStyle = 'rgba(44,62,80,0.35)';
-      ctx.font = '13px Arial, sans-serif';
+      ctx.font = '13px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.fillText('Best: ' + bestScore, 22, 62);
     }
 
     if (combo > 1) {
       ctx.fillStyle = '#E74C3C';
-      ctx.font = 'bold 24px Arial, sans-serif';
+      ctx.font = 'bold 24px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'center';
       const comboScale = 1 + (combo > 3 ? 0.2 : 0);
       ctx.save();
@@ -837,38 +1001,44 @@
     }
 
     for (let i = 0; i < maxMisses; i++) {
-      ctx.fillStyle = i < misses ? 'rgba(231,76,60,0.3)' : '#E74C3C';
-      ctx.font = '20px Arial';
+      ctx.fillStyle = i < (maxMisses - misses) ? '#E74C3C' : 'rgba(231,76,60,0.25)';
+      ctx.font = '20px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'right';
-      ctx.fillText('X', W - 15 - i * 25, 38);
+      ctx.fillText('\u2764', W - 15 - i * 25, 38);
     }
 
     renderMuteButton();
 
     if (freezeActive) {
       ctx.fillStyle = '#74B9FF';
-      ctx.font = 'bold 14px Arial, sans-serif';
+      ctx.font = 'bold 14px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'left';
       const barW = 60;
-      const frac = freezeTimer / 3.0;
+      const frac = freezeTimer / FREEZE_DURATION;
       ctx.fillRect(20, H - 30, barW * frac, 8);
       ctx.strokeStyle = 'rgba(116,185,255,0.5)';
       ctx.lineWidth = 1;
       ctx.strokeRect(20, H - 30, barW, 8);
-      ctx.fillText('FREEZE', 20, H - 36);
+      ctx.fillText('FROZEN', 20, H - 36);
     }
 
     if (paused) {
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = '#fff';
-      ctx.font = 'bold 44px Arial, sans-serif';
+      ctx.font = 'bold 44px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText('PAUSED', W / 2, H * 0.4);
-      ctx.font = '20px Arial, sans-serif';
+      ctx.font = '20px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.fillStyle = 'rgba(255,255,255,0.6)';
       ctx.fillText('Press P to resume', W / 2, H * 0.48);
       ctx.fillText('M to toggle sound', W / 2, H * 0.54);
+    }
+
+    // --- Fade-in overlay ---
+    if (transitionAlpha > 0) {
+      ctx.fillStyle = 'rgba(0,0,0,' + transitionAlpha + ')';
+      ctx.fillRect(-20, -20, W + 40, H + 40);
     }
 
     ctx.restore();
@@ -908,7 +1078,7 @@
     ctx.restore();
 
     ctx.fillStyle = '#2D3436';
-    ctx.font = 'bold 48px Arial, sans-serif';
+    ctx.font = 'bold 48px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.shadowColor = 'rgba(0,0,0,0.1)';
     ctx.shadowBlur = 8;
@@ -919,18 +1089,18 @@
     const alpha = 0.5 + 0.5 * Math.sin(Date.now() / 500);
     ctx.globalAlpha = alpha;
     ctx.fillStyle = '#636E72';
-    ctx.font = '22px Arial, sans-serif';
+    ctx.font = '22px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillText('Tap to Play', W / 2, H * 0.68);
     ctx.globalAlpha = 1;
 
-    ctx.font = '14px Arial, sans-serif';
-    ctx.fillStyle = 'rgba(100,100,100,0.6)';
-    ctx.fillText('Swipe to slice, avoid bombs!', W / 2, H * 0.75);
+    ctx.font = '16px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(100,100,100,0.7)';
+    ctx.fillText('Swipe to slice \u2014 avoid the bombs!', W / 2, H * 0.75);
     ctx.fillText('P = Pause | M = Mute', W / 2, H * 0.79);
 
     if (bestScore > 0) {
       ctx.fillStyle = '#E74C3C';
-      ctx.font = '18px Arial, sans-serif';
+      ctx.font = '18px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.fillText('Best: ' + bestScore, W / 2, H * 0.86);
     }
 
@@ -942,35 +1112,44 @@
     applyShake();
     render();
 
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    const fade = gameOverFading || gameOverFade < 1 ? gameOverFade : 1;
+    ctx.fillStyle = 'rgba(0,0,0,' + (0.55 * fade) + ')';
     ctx.fillRect(-20, -20, W + 40, H + 40);
 
+    ctx.globalAlpha = fade;
+
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.font = 'bold 44px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('Game Over', W / 2, H * 0.28);
-    ctx.font = 'bold 64px Arial, sans-serif';
+    ctx.font = 'bold 64px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillText(score, W / 2, H * 0.42);
-    ctx.font = '20px Arial, sans-serif';
+    ctx.font = '20px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = '#FDCB6E';
     ctx.fillText('Best: ' + bestScore, W / 2, H * 0.50);
+
+    ctx.font = '15px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText('Slices: ' + totalSlices + '    Best Combo: ' + bestCombo + 'x', W / 2, H * 0.555);
 
     if (newBestTriggered) {
       const pulse = 1 + 0.1 * Math.sin(Date.now() / 200);
       ctx.save();
-      ctx.translate(W / 2, H * 0.54);
+      ctx.translate(W / 2, H * 0.60);
       ctx.scale(pulse, pulse);
       ctx.fillStyle = '#FFD700';
-      ctx.font = 'bold 22px Arial, sans-serif';
+      ctx.font = 'bold 22px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.fillText('NEW BEST!', 0, 0);
       ctx.restore();
     }
 
     ctx.fillStyle = '#E74C3C';
-    roundRect(W / 2 - 90, H * 0.60, 180, 50, 25);
+    roundRect(W / 2 - 90, H * 0.66, 180, 50, 25);
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 20px Arial, sans-serif';
-    ctx.fillText('Play Again', W / 2, H * 0.60 + 32);
+    ctx.font = 'bold 20px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.fillText('Play Again', W / 2, H * 0.66 + 32);
+
+    ctx.globalAlpha = 1;
 
     renderNewBestParticles();
     renderFloatingTexts();
@@ -1003,9 +1182,15 @@
     if (isMuteClick(e)) { toggleMute(); return; }
     onSwipeStart(e);
   });
-  canvas.addEventListener('mousemove', e => { onSwipeMove(e); });
+  canvas.addEventListener('mousemove', e => {
+    const pos = getPos(e);
+    const dx = pos.x - MUTE_CX, dy = pos.y - MUTE_CY;
+    muteHovered = dx * dx + dy * dy <= (MUTE_R + 4) * (MUTE_R + 4);
+    canvas.style.cursor = muteHovered ? 'pointer' : 'default';
+    onSwipeMove(e);
+  });
   canvas.addEventListener('mouseup', () => { onSwipeEnd(); });
-  canvas.addEventListener('mouseleave', () => { onSwipeEnd(); });
+  canvas.addEventListener('mouseleave', () => { muteHovered = false; onSwipeEnd(); });
 
   canvas.addEventListener('touchstart', e => {
     e.preventDefault();

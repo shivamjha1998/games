@@ -9,8 +9,8 @@
   html, body { height: 100%; overflow: hidden; background: #2D3436; touch-action: manipulation; }
   body { display: flex; align-items: center; justify-content: center; }
   canvas { display: block; }
-  .home-link { position: fixed; top: 12px; left: 12px; color: rgba(255,255,255,0.6); text-decoration: none; font-family: sans-serif; font-size: 0.85rem; z-index: 10; }
-  .home-link:hover { color: #fff; }
+  .home-link { position: fixed; top: 12px; left: 12px; color: rgba(255,255,255,0.7); text-decoration: none; font-family: system-ui, sans-serif; font-size: 0.8rem; z-index: 10; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); background: rgba(0,0,0,0.25); padding: 6px 14px; border-radius: 20px; transition: background 0.2s, color 0.2s; }
+  .home-link:hover { color: #fff; background: rgba(0,0,0,0.45); }
 </style>
 </head>
 <body>
@@ -18,6 +18,15 @@
 <canvas id="c"></canvas>
 <script>
 (() => {
+  /**
+   * Snake — Classic snake with modern visuals
+   * Guide the snake to eat food and grow. Don't hit the walls or yourself!
+   *
+   * Controls: Swipe / Arrow Keys to change direction, P to pause, M to mute
+   * Rendering: Canvas 2D, 400x700 internal resolution
+   * State machine: title → playing → gameover
+   */
+
   const W = 400, H = 700;
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
@@ -33,12 +42,113 @@
   }
   window.addEventListener('resize', resize); resize();
 
-  const COLS = 18, ROWS = 30;
+  const COLS = 20, ROWS = 32;
   const CELL = Math.floor(Math.min(W / COLS, (H - 60) / ROWS));
   const OFFSET_X = (W - COLS * CELL) / 2;
   const OFFSET_Y = 60;
   const DIRS = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
   const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
+
+  // === CONFIGURATION ===
+  // Speed
+  const INITIAL_TICK_INTERVAL = 150;
+  const MIN_TICK_INTERVAL = 80;
+  const SPEED_RAMP_FACTOR = 1.5;
+
+  // Golden apple
+  const GOLDEN_APPLE_SPAWN_INTERVAL = 7; // every N regular foods eaten
+  const GOLDEN_APPLE_SCORE = 3;
+
+  // Direction queue
+  const DIR_QUEUE_MAX = 3;
+
+  // Particles
+  const PARTICLE_DECAY = 2.5;
+  const FOOD_PARTICLE_COUNT = 14;
+  const FOOD_PARTICLE_SPEED = 130;
+  const FOOD_PARTICLE_SIZE = 3;
+  const GOLDEN_EAT_PARTICLE_COUNT = 20;
+  const GOLDEN_PARTICLE_SPEED_MIN = 80;
+  const GOLDEN_PARTICLE_SPEED_RANGE = 100;
+  const GOLDEN_PARTICLE_UPWARD_BIAS = -40;
+  const GOLDEN_PARTICLE_GRAVITY = 80;
+  const DEATH_PARTICLE_SPEED_MIN = 60;
+  const DEATH_PARTICLE_SPEED_RANGE = 120;
+  const DEATH_PARTICLE_GRAVITY = 100;
+  const DEATH_HEAD_PARTICLE_COUNT = 12;
+  const DEATH_BODY_PARTICLE_COUNT = 4;
+
+  // Trail
+  const TRAIL_INTERVAL = 0.05;
+  const TRAIL_JITTER = 6;
+  const TRAIL_SPEED = 20;
+  const TRAIL_LIFE = 0.5;
+  const TRAIL_SIZE_MIN = 1.5;
+  const TRAIL_SIZE_RANGE = 1.5;
+
+  // Floating text
+  const FLOATING_TEXT_VY = -60;
+  const FLOATING_TEXT_GLOW_BLUR = 8;
+
+  // Screen effects
+  const SHAKE_THRESHOLD = 0.5;
+  const SHAKE_DECAY = 0.85;
+  const DEATH_SHAKE_MAG = 12;
+  const SCREEN_FLASH_DECAY = 4;
+
+  // Milestones
+  const MILESTONE_INTERVAL = 10;
+  const MILESTONE_PARTICLE_COUNT = 30;
+  const NEW_BEST_PARTICLE_COUNT = 40;
+
+  // Wall warning
+  const WALL_WARN_DISTANCE = 1;
+  const WALL_PULSE_SPEED = 100; // divisor for Date.now()
+  const WALL_PULSE_MIN = 0.15;
+  const WALL_PULSE_AMPLITUDE = 0.1;
+
+  // Grid visuals
+  const GRID_LINE_ALPHA = 0.03;
+  const NEON_BORDER_BLUR = 15;
+
+  // Snake visuals
+  const SNAKE_SEGMENT_PAD = 2;
+  const SNAKE_SEGMENT_RADIUS = 4;
+  const EYE_OFFSET = 4;
+  const EYE_RADIUS = 3;
+  const PUPIL_RADIUS = 1.5;
+  const EYE_FORWARD_OFFSET = 3;
+  const PUPIL_FORWARD_OFFSET = 1;
+
+  // Food visuals
+  const FOOD_PULSE_SPEED = 200;
+  const FOOD_PULSE_AMPLITUDE = 0.15;
+  const FOOD_GLOW_BLUR = 10;
+  const GOLDEN_PULSE_SPEED = 150;
+  const GOLDEN_PULSE_AMPLITUDE = 0.2;
+  const GOLDEN_GLOW_BLUR = 15;
+  const GOLDEN_SPARKLE_COUNT = 3;
+  const GOLDEN_SPARKLE_SPEED = 300;
+  const GOLDEN_SPARKLE_RADIUS = 1.5;
+  const GOLDEN_SPARKLE_OFFSET = 3;
+
+  // Speed indicator
+  const SPEED_DOT_COUNT = 5;
+  const SPEED_DOT_RADIUS = 4;
+  const SPEED_DOT_SPACING = 12;
+  const SPEED_DOT_START_X = 32;
+
+  // Swipe threshold
+  const SWIPE_THRESHOLD = 20;
+
+  // Transitions
+  const TRANSITION_DURATION = 0.3;
+  const SLOW_MOTION_FACTOR = 0.25;
+  const SLOW_MOTION_DURATION = 0.5;
+  const GAME_OVER_FADE_SPEED = 3;
+
+  // Audio
+  const AUDIO_FADEOUT = 0.001;
 
   let state, score, bestScore, snake, dir, dirQueue, food, lastTime, tickTimer, tickInterval;
   let tickProgress, prevHead, particles;
@@ -47,18 +157,79 @@
   let floatingTexts, prevPositions, trailTimer;
   let newBestTriggered, lastMilestone;
 
+  // --- Screen Transition State ---
+  let transitionAlpha = 0;
+  let transitionTimer = 0;
+  let slowMotion = false;
+  let slowMotionTimer = 0;
+  let gameOverFade = 0;
+  let gameOverFading = false;
+
   let muted = localStorage.getItem('snake_muted') === 'true';
 
+  // === AUDIO ENGINE ===
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   let actx;
-  function initAudio() { if (!actx) actx = new AudioCtx(); if (actx.state === 'suspended') actx.resume(); }
-  function tone(freq, dur, type, vol) { if (!actx || muted) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(freq, actx.currentTime); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
-  function sweep(f1, f2, dur, type, vol) { if (!actx || muted) return; const o = actx.createOscillator(), g = actx.createGain(); o.type = type || 'sine'; o.frequency.setValueAtTime(f1, actx.currentTime); o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur); g.gain.setValueAtTime(vol || 0.3, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + dur); }
-  function noise(dur, vol) { if (!actx || muted) return; const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = actx.createBufferSource(), g = actx.createGain(); s.buffer = buf; g.gain.setValueAtTime(vol || 0.15, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur); s.connect(g); g.connect(actx.destination); s.start(); }
+
+  function initAudio() {
+    if (!actx) actx = new AudioCtx();
+    if (actx.state === 'suspended') actx.resume();
+  }
+
+  function tone(freq, dur, type, vol) {
+    if (!actx || muted) return;
+    const o = actx.createOscillator();
+    const g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, actx.currentTime);
+    g.gain.setValueAtTime(vol || 0.3, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(AUDIO_FADEOUT, actx.currentTime + dur);
+    o.connect(g);
+    g.connect(actx.destination);
+    o.start();
+    o.stop(actx.currentTime + dur);
+  }
+
+  function sweep(f1, f2, dur, type, vol) {
+    if (!actx || muted) return;
+    const o = actx.createOscillator();
+    const g = actx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(f1, actx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(f2, actx.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.3, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(AUDIO_FADEOUT, actx.currentTime + dur);
+    o.connect(g);
+    g.connect(actx.destination);
+    o.start();
+    o.stop(actx.currentTime + dur);
+  }
+
+  function noise(dur, vol) {
+    if (!actx || muted) return;
+    const buf = actx.createBuffer(1, actx.sampleRate * dur | 0, actx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const src = actx.createBufferSource();
+    const g = actx.createGain();
+    src.buffer = buf;
+    g.gain.setValueAtTime(vol || 0.15, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(AUDIO_FADEOUT, actx.currentTime + dur);
+    src.connect(g);
+    g.connect(actx.destination);
+    src.start();
+  }
+
+  // === SOUND EFFECTS ===
+  // Eat — upward sweep + square accent for eating regular food
   function sndEat() { sweep(400, 800, 0.12, 'sine', 0.25); tone(600, 0.08, 'square', 0.15); }
+  // Golden Eat — higher sweep + dual accent for eating golden apple
   function sndGoldenEat() { sweep(500, 1200, 0.15, 'sine', 0.3); tone(800, 0.1, 'square', 0.2); tone(1000, 0.15, 'sine', 0.15); }
+  // Game Over — descending sawtooth sweep + noise burst for death
   function sndGameOver() { sweep(300, 60, 0.6, 'sawtooth', 0.25); noise(0.3, 0.2); }
+  // Milestone — three-note ascending fanfare for score milestones
   function sndMilestone() { if (!actx || muted) return; tone(523, 0.1, 'sine', 0.25); setTimeout(() => tone(659, 0.1, 'sine', 0.25), 80); setTimeout(() => tone(784, 0.15, 'sine', 0.3), 160); }
+  // New Best — four-note ascending fanfare for new high score
   function sndNewBest() { if (!actx || muted) return; tone(523, 0.1, 'sine', 0.25); setTimeout(() => tone(659, 0.1, 'sine', 0.25), 100); setTimeout(() => tone(784, 0.1, 'sine', 0.25), 200); setTimeout(() => tone(1047, 0.2, 'sine', 0.3), 300); }
 
   function init() {
@@ -70,7 +241,7 @@
     lastTime = 0;
     tickTimer = 0;
     tickProgress = 0;
-    tickInterval = 150;
+    tickInterval = INITIAL_TICK_INTERVAL;
     paused = false;
     foodCount = 0;
     goldenApple = null;
@@ -82,6 +253,12 @@
     trailTimer = 0;
     newBestTriggered = false;
     lastMilestone = 0;
+    transitionAlpha = 0;
+    transitionTimer = 0;
+    slowMotion = false;
+    slowMotionTimer = 0;
+    gameOverFade = 0;
+    gameOverFading = false;
 
     const cx = Math.floor(COLS / 2), cy = Math.floor(ROWS / 2);
     snake = [{ x: cx, y: cy }, { x: cx - 1, y: cy }, { x: cx - 2, y: cy }];
@@ -115,7 +292,7 @@
   }
 
   function addFloatingText(text, x, y, color, size, duration) {
-    floatingTexts.push({ text, x, y, color: color || '#fff', size: size || 20, life: 1, duration: duration || 1.2, vy: -60 });
+    floatingTexts.push({ text, x, y, color: color || '#fff', size: size || 20, life: 1, duration: duration || 1.2, vy: FLOATING_TEXT_VY });
   }
 
   function triggerScreenFlash(color, intensity) {
@@ -128,7 +305,7 @@
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       const spd = (speed || 120) * (0.5 + Math.random() * 0.5);
-      particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life: 1, color: color || '#E74C3C', size: (size || 3) + Math.random() * 3, gravity: 0 });
+      particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life: 1, color: color || '#E74C3C', size: (size || FOOD_PARTICLE_SIZE) + Math.random() * 3, gravity: 0 });
     }
   }
 
@@ -136,15 +313,15 @@
     const colors = ['#FDCB6E', '#F39C12', '#FFD700', '#FFA500'];
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
-      const spd = 80 + Math.random() * 100;
-      particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd - 40, life: 1, color: colors[Math.floor(Math.random() * colors.length)], size: 2 + Math.random() * 4, gravity: 80 });
+      const spd = GOLDEN_PARTICLE_SPEED_MIN + Math.random() * GOLDEN_PARTICLE_SPEED_RANGE;
+      particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd + GOLDEN_PARTICLE_UPWARD_BIAS, life: 1, color: colors[Math.floor(Math.random() * colors.length)], size: 2 + Math.random() * 4, gravity: GOLDEN_PARTICLE_GRAVITY });
     }
   }
 
   function changeDir(newDir) {
     const lastDir = dirQueue.length > 0 ? dirQueue[dirQueue.length - 1] : dir;
     if (newDir !== lastDir && newDir !== OPPOSITE[lastDir]) {
-      if (dirQueue.length < 2) dirQueue.push(newDir);
+      if (dirQueue.length < DIR_QUEUE_MAX) dirQueue.push(newDir);
     }
   }
 
@@ -171,10 +348,10 @@
       sndGoldenEat();
       const fx = OFFSET_X + goldenApple.x * CELL + CELL / 2;
       const fy = OFFSET_Y + goldenApple.y * CELL + CELL / 2;
-      spawnGoldenParticles(fx, fy, 20);
-      addFloatingText('+3', fx, fy, '#FFD700', 28, 1.5);
-      score += 3;
-      tickInterval = Math.max(70, 150 - score * 3);
+      spawnGoldenParticles(fx, fy, GOLDEN_EAT_PARTICLE_COUNT);
+      addFloatingText('+' + GOLDEN_APPLE_SCORE, fx, fy, '#FFD700', 28, 1.5);
+      score += GOLDEN_APPLE_SCORE;
+      tickInterval = Math.max(MIN_TICK_INTERVAL, INITIAL_TICK_INTERVAL - score * SPEED_RAMP_FACTOR);
       goldenApple = null;
       triggerScreenFlash('rgba(255, 215, 0, 0.25)', 0.35);
       ate = true;
@@ -183,13 +360,13 @@
       sndEat();
       score++;
       foodCount++;
-      tickInterval = Math.max(70, 150 - score * 3);
+      tickInterval = Math.max(MIN_TICK_INTERVAL, INITIAL_TICK_INTERVAL - score * SPEED_RAMP_FACTOR);
       const fx = OFFSET_X + food.x * CELL + CELL / 2;
       const fy = OFFSET_Y + food.y * CELL + CELL / 2;
-      spawnParticleBurst(fx, fy, 14, '#E74C3C', 130, 3);
+      spawnParticleBurst(fx, fy, FOOD_PARTICLE_COUNT, '#E74C3C', FOOD_PARTICLE_SPEED, FOOD_PARTICLE_SIZE);
       addFloatingText('+1', fx, fy, '#fff', 22, 1.0);
       spawnFood();
-      if (foodCount % 7 === 0 && !goldenApple) {
+      if (foodCount % GOLDEN_APPLE_SPAWN_INTERVAL === 0 && !goldenApple) {
         spawnGoldenApple();
       }
       ate = true;
@@ -199,11 +376,11 @@
       snake.pop();
     }
 
-    if (score > 0 && score % 10 === 0 && score !== lastMilestone) {
+    if (score > 0 && score % MILESTONE_INTERVAL === 0 && score !== lastMilestone) {
       lastMilestone = score;
       sndMilestone();
       addFloatingText('MILESTONE!', W / 2, H * 0.35, '#FDCB6E', 30, 2.0);
-      spawnGoldenParticles(W / 2, H * 0.38, 30);
+      spawnGoldenParticles(W / 2, H * 0.38, MILESTONE_PARTICLE_COUNT);
       triggerScreenFlash('rgba(255, 215, 0, 0.2)', 0.3);
     }
 
@@ -211,18 +388,20 @@
       newBestTriggered = true;
       sndNewBest();
       addFloatingText('NEW BEST!', W / 2, H * 0.3, '#FFD700', 34, 2.5);
-      spawnGoldenParticles(W / 2, H * 0.34, 40);
+      spawnGoldenParticles(W / 2, H * 0.34, NEW_BEST_PARTICLE_COUNT);
       triggerScreenFlash('rgba(255, 215, 0, 0.3)', 0.4);
     }
   }
 
   function die() {
+    if (slowMotion) return; // prevent double-death during slow-motion
     sndGameOver();
-    state = 'gameover';
+    slowMotion = true;
+    slowMotionTimer = SLOW_MOTION_DURATION;
     bestScore = Math.max(score, bestScore);
     localStorage.setItem('snake_best', bestScore);
 
-    shakeMag = 12;
+    shakeMag = DEATH_SHAKE_MAG;
     shakeTime = 0;
 
     triggerScreenFlash('rgba(255, 0, 0, 0.35)', 0.5);
@@ -235,18 +414,18 @@
       const g = Math.round(206 - 114 * t);
       const b = Math.round(201 + 30 * t);
       const col = 'rgb(' + r + ',' + g + ',' + b + ')';
-      const count = i === 0 ? 12 : 4;
+      const count = i === 0 ? DEATH_HEAD_PARTICLE_COUNT : DEATH_BODY_PARTICLE_COUNT;
       for (let j = 0; j < count; j++) {
         const a = Math.random() * Math.PI * 2;
-        const spd = 60 + Math.random() * 120;
-        particles.push({ x: sx, y: sy, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life: 1, color: col, size: 2 + Math.random() * 4, gravity: 100 });
+        const spd = DEATH_PARTICLE_SPEED_MIN + Math.random() * DEATH_PARTICLE_SPEED_RANGE;
+        particles.push({ x: sx, y: sy, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life: 1, color: col, size: 2 + Math.random() * 4, gravity: DEATH_PARTICLE_GRAVITY });
       }
     }
   }
 
   function tap(e) {
-    if (state === 'title') { initAudio(); state = 'playing'; return; }
-    if (state === 'gameover') { init(); state = 'playing'; return; }
+    if (state === 'title') { initAudio(); state = 'playing'; transitionAlpha = 1; transitionTimer = TRANSITION_DURATION; return; }
+    if (state === 'gameover') { init(); return; }
   }
 
   function toggleMute() {
@@ -263,15 +442,37 @@
   }
 
   function update(dt) {
-    if (shakeMag > 0.5) {
+    // --- Screen Transition Logic ---
+    if (slowMotion) {
+      dt *= SLOW_MOTION_FACTOR;
+      slowMotionTimer -= dt * (1 / SLOW_MOTION_FACTOR); // decrement in real time
+      if (slowMotionTimer <= 0) {
+        slowMotion = false;
+        state = 'gameover';
+        gameOverFade = 0;
+        gameOverFading = true;
+      }
+    }
+
+    if (transitionTimer > 0) {
+      transitionTimer -= dt;
+      transitionAlpha = Math.max(0, transitionTimer / TRANSITION_DURATION);
+    }
+
+    if (gameOverFading) {
+      gameOverFade = Math.min(1, gameOverFade + dt * GAME_OVER_FADE_SPEED);
+      if (gameOverFade >= 1) gameOverFading = false;
+    }
+
+    if (shakeMag > SHAKE_THRESHOLD) {
       shakeTime += dt;
-      shakeMag *= 0.85;
+      shakeMag *= SHAKE_DECAY;
     } else {
       shakeMag = 0;
     }
 
     if (screenFlash > 0) {
-      screenFlashLife -= dt * 4;
+      screenFlashLife -= dt * SCREEN_FLASH_DECAY;
       if (screenFlashLife <= 0) {
         screenFlash = 0;
         screenFlashLife = 0;
@@ -290,11 +491,14 @@
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       if (p.gravity) p.vy += p.gravity * dt;
-      p.life -= dt * 2.5;
+      p.life -= dt * PARTICLE_DECAY;
       if (p.life <= 0) particles.splice(i, 1);
     }
 
     if (state !== 'playing' || paused) return;
+
+    // Don't advance game ticks during slow-motion death
+    if (slowMotion) return;
 
     tickTimer += dt * 1000;
     tickProgress = Math.min(tickTimer / tickInterval, 1);
@@ -305,12 +509,12 @@
     }
 
     trailTimer += dt;
-    if (trailTimer > 0.05 && snake.length > 0) {
+    if (trailTimer > TRAIL_INTERVAL && snake.length > 0) {
       trailTimer = 0;
       const tail = snake[snake.length - 1];
       const tx = OFFSET_X + tail.x * CELL + CELL / 2;
       const ty = OFFSET_Y + tail.y * CELL + CELL / 2;
-      particles.push({ x: tx + (Math.random() - 0.5) * 6, y: ty + (Math.random() - 0.5) * 6, vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20, life: 0.5, color: 'rgba(108, 92, 231, 0.6)', size: 1.5 + Math.random() * 1.5, gravity: 0 });
+      particles.push({ x: tx + (Math.random() - 0.5) * TRAIL_JITTER, y: ty + (Math.random() - 0.5) * TRAIL_JITTER, vx: (Math.random() - 0.5) * TRAIL_SPEED, vy: (Math.random() - 0.5) * TRAIL_SPEED, life: TRAIL_LIFE, color: 'rgba(108, 92, 231, 0.6)', size: TRAIL_SIZE_MIN + Math.random() * TRAIL_SIZE_RANGE, gravity: 0 });
     }
   }
 
@@ -331,7 +535,7 @@
   function render() {
     ctx.save();
 
-    if (shakeMag > 0.5) {
+    if (shakeMag > SHAKE_THRESHOLD) {
       const sx = (Math.random() - 0.5) * 2 * shakeMag;
       const sy = (Math.random() - 0.5) * 2 * shakeMag;
       ctx.translate(sx, sy);
@@ -347,45 +551,67 @@
       }
     }
 
+    ctx.strokeStyle = 'rgba(255,255,255,' + GRID_LINE_ALPHA + ')';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= COLS; x++) {
+      ctx.beginPath();
+      ctx.moveTo(OFFSET_X + x * CELL, OFFSET_Y);
+      ctx.lineTo(OFFSET_X + x * CELL, OFFSET_Y + ROWS * CELL);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= ROWS; y++) {
+      ctx.beginPath();
+      ctx.moveTo(OFFSET_X, OFFSET_Y + y * CELL);
+      ctx.lineTo(OFFSET_X + COLS * CELL, OFFSET_Y + y * CELL);
+      ctx.stroke();
+    }
+
     if (state === 'playing' && snake.length > 0) {
       const head = snake[0];
-      const warnDist = 1;
       let nearWall = false;
-      if (head.x <= warnDist || head.x >= COLS - 1 - warnDist ||
-          head.y <= warnDist || head.y >= ROWS - 1 - warnDist) {
+      if (head.x <= WALL_WARN_DISTANCE || head.x >= COLS - 1 - WALL_WARN_DISTANCE ||
+          head.y <= WALL_WARN_DISTANCE || head.y >= ROWS - 1 - WALL_WARN_DISTANCE) {
         nearWall = true;
       }
       if (nearWall) {
-        const pulse = 0.15 + 0.1 * Math.sin(Date.now() / 100);
+        const pulse = WALL_PULSE_MIN + WALL_PULSE_AMPLITUDE * Math.sin(Date.now() / WALL_PULSE_SPEED);
         ctx.strokeStyle = 'rgba(231, 76, 60, ' + pulse + ')';
         ctx.lineWidth = 4;
         ctx.strokeRect(OFFSET_X, OFFSET_Y, COLS * CELL, ROWS * CELL);
       }
     }
 
+    ctx.save();
+    ctx.shadowColor = '#00CEC9';
+    ctx.shadowBlur = NEON_BORDER_BLUR;
+    ctx.strokeStyle = 'rgba(0, 206, 201, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(OFFSET_X, OFFSET_Y, COLS * CELL, ROWS * CELL);
+    ctx.restore();
+
     ctx.strokeStyle = '#3D4446';
     ctx.lineWidth = 2;
     ctx.strokeRect(OFFSET_X, OFFSET_Y, COLS * CELL, ROWS * CELL);
 
     if (goldenApple) {
-      const pulse = 1 + 0.2 * Math.sin(Date.now() / 150);
+      const pulse = 1 + GOLDEN_PULSE_AMPLITUDE * Math.sin(Date.now() / GOLDEN_PULSE_SPEED);
       const gp = cellToScreen(goldenApple.x, goldenApple.y);
       const gcx = gp.x + CELL / 2, gcy = gp.y + CELL / 2;
       const gr = (CELL / 2 - 2) * pulse;
 
       ctx.fillStyle = '#FFD700';
       ctx.shadowColor = '#FFD700';
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = GOLDEN_GLOW_BLUR;
       ctx.beginPath(); ctx.arc(gcx, gcy, gr, 0, Math.PI * 2); ctx.fill();
       ctx.shadowBlur = 0;
 
       ctx.fillStyle = '#FFF8DC';
-      const sparkAngle = Date.now() / 300;
-      for (let i = 0; i < 3; i++) {
-        const sa = sparkAngle + i * (Math.PI * 2 / 3);
-        const spx = gcx + Math.cos(sa) * (gr + 3);
-        const spy = gcy + Math.sin(sa) * (gr + 3);
-        ctx.beginPath(); ctx.arc(spx, spy, 1.5, 0, Math.PI * 2); ctx.fill();
+      const sparkAngle = Date.now() / GOLDEN_SPARKLE_SPEED;
+      for (let i = 0; i < GOLDEN_SPARKLE_COUNT; i++) {
+        const sa = sparkAngle + i * (Math.PI * 2 / GOLDEN_SPARKLE_COUNT);
+        const spx = gcx + Math.cos(sa) * (gr + GOLDEN_SPARKLE_OFFSET);
+        const spy = gcy + Math.sin(sa) * (gr + GOLDEN_SPARKLE_OFFSET);
+        ctx.beginPath(); ctx.arc(spx, spy, GOLDEN_SPARKLE_RADIUS, 0, Math.PI * 2); ctx.fill();
       }
 
       ctx.fillStyle = '#00B894';
@@ -394,20 +620,20 @@
       ctx.fill();
 
       ctx.fillStyle = '#FFD700';
-      ctx.font = 'bold 10px Arial, sans-serif';
+      ctx.font = 'bold 10px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('x3', gcx, gcy + 3);
+      ctx.fillText('x' + GOLDEN_APPLE_SCORE, gcx, gcy + 3);
     }
 
     if (food) {
-      const pulse = 1 + 0.15 * Math.sin(Date.now() / 200);
+      const pulse = 1 + FOOD_PULSE_AMPLITUDE * Math.sin(Date.now() / FOOD_PULSE_SPEED);
       const fp = cellToScreen(food.x, food.y);
       const fcx = fp.x + CELL / 2, fcy = fp.y + CELL / 2;
       const fr = (CELL / 2 - 2) * pulse;
 
       ctx.fillStyle = '#E74C3C';
       ctx.shadowColor = '#E74C3C';
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = FOOD_GLOW_BLUR;
       ctx.beginPath(); ctx.arc(fcx, fcy, fr, 0, Math.PI * 2); ctx.fill();
       ctx.shadowBlur = 0;
 
@@ -417,7 +643,6 @@
       ctx.fill();
     }
 
-    const pad = 2;
     for (let i = snake.length - 1; i >= 0; i--) {
       const seg = snake[i];
       let sx, sy;
@@ -437,8 +662,7 @@
       const b = Math.round(201 + 30 * t);
       ctx.fillStyle = 'rgb(' + r + ', ' + g + ', ' + b + ')';
 
-      const radius = 4;
-      drawRoundedRect(sx + pad, sy + pad, CELL - pad * 2, CELL - pad * 2, radius);
+      drawRoundedRect(sx + SNAKE_SEGMENT_PAD, sy + SNAKE_SEGMENT_PAD, CELL - SNAKE_SEGMENT_PAD * 2, CELL - SNAKE_SEGMENT_PAD * 2, SNAKE_SEGMENT_RADIUS);
       ctx.fill();
     }
 
@@ -453,22 +677,19 @@
         hy = OFFSET_Y + head.y * CELL + CELL / 2;
       }
       const d = DIRS[dir];
-      const eyeOff = 4;
-      const eyeR = 3;
-      const pupilR = 1.5;
 
-      const ex1 = hx + d.y * eyeOff + d.x * 3;
-      const ey1 = hy - d.x * eyeOff + d.y * 3;
-      const ex2 = hx - d.y * eyeOff + d.x * 3;
-      const ey2 = hy + d.x * eyeOff + d.y * 3;
+      const ex1 = hx + d.y * EYE_OFFSET + d.x * EYE_FORWARD_OFFSET;
+      const ey1 = hy - d.x * EYE_OFFSET + d.y * EYE_FORWARD_OFFSET;
+      const ex2 = hx - d.y * EYE_OFFSET + d.x * EYE_FORWARD_OFFSET;
+      const ey2 = hy + d.x * EYE_OFFSET + d.y * EYE_FORWARD_OFFSET;
 
       ctx.fillStyle = '#fff';
-      ctx.beginPath(); ctx.arc(ex1, ey1, eyeR, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(ex2, ey2, eyeR, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex1, ey1, EYE_RADIUS, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex2, ey2, EYE_RADIUS, 0, Math.PI * 2); ctx.fill();
 
       ctx.fillStyle = '#2D3436';
-      ctx.beginPath(); ctx.arc(ex1 + d.x * 1, ey1 + d.y * 1, pupilR, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(ex2 + d.x * 1, ey2 + d.y * 1, pupilR, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex1 + d.x * PUPIL_FORWARD_OFFSET, ey1 + d.y * PUPIL_FORWARD_OFFSET, PUPIL_RADIUS, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex2 + d.x * PUPIL_FORWARD_OFFSET, ey2 + d.y * PUPIL_FORWARD_OFFSET, PUPIL_RADIUS, 0, Math.PI * 2); ctx.fill();
     }
 
     particles.forEach(p => {
@@ -488,31 +709,34 @@
     floatingTexts.forEach(ft => {
       ctx.globalAlpha = Math.max(0, ft.life);
       ctx.fillStyle = ft.color;
-      ctx.font = 'bold ' + ft.size + 'px Arial, sans-serif';
+      ctx.font = 'bold ' + ft.size + 'px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.shadowColor = ft.color;
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = FLOATING_TEXT_GLOW_BLUR;
       ctx.fillText(ft.text, ft.x, ft.y);
       ctx.shadowBlur = 0;
     });
     ctx.globalAlpha = 1;
 
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 28px Arial, sans-serif';
+    ctx.font = 'bold 28px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
+    ctx.shadowColor = '#00CEC9';
+    ctx.shadowBlur = 12;
     ctx.fillText(score, W / 2, 40);
+    ctx.shadowBlur = 0;
 
     if (state === 'playing') {
       const speedLvl = getSpeedLevel();
-      ctx.font = '12px Arial, sans-serif';
+      ctx.font = '12px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillStyle = 'rgba(255,255,255,0.5)';
       ctx.fillText('SPD', OFFSET_X + 2, 20);
-      for (let i = 0; i < 5; i++) {
-        const dotX = OFFSET_X + 32 + i * 12;
+      for (let i = 0; i < SPEED_DOT_COUNT; i++) {
+        const dotX = OFFSET_X + SPEED_DOT_START_X + i * SPEED_DOT_SPACING;
         const dotY = 16;
         ctx.beginPath();
-        ctx.arc(dotX, dotY, 4, 0, Math.PI * 2);
+        ctx.arc(dotX, dotY, SPEED_DOT_RADIUS, 0, Math.PI * 2);
         if (i < speedLvl) {
           const colors = ['#00CEC9', '#00CEC9', '#FDCB6E', '#E17055', '#D63031'];
           ctx.fillStyle = colors[i];
@@ -525,40 +749,64 @@
 
     renderMuteIcon();
 
+    // --- Fade-in overlay ---
+    if (transitionAlpha > 0) {
+      ctx.fillStyle = 'rgba(0,0,0,' + transitionAlpha + ')';
+      ctx.fillRect(-10, -10, W + 20, H + 20);
+    }
+
     ctx.restore();
   }
 
+  // Mute button constants
+  const MUTE_CX = W - 28, MUTE_CY = 28, MUTE_R = 20;
+  let muteHovered = false;
+
   function renderMuteIcon() {
-    const ix = W - 36, iy = 10, sz = 20;
     ctx.save();
-    ctx.globalAlpha = 0.6;
-    ctx.fillStyle = '#fff'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(ix, iy + 6); ctx.lineTo(ix + 5, iy + 6);
-    ctx.lineTo(ix + 10, iy + 1); ctx.lineTo(ix + 10, iy + sz - 1);
-    ctx.lineTo(ix + 5, iy + sz - 6); ctx.lineTo(ix, iy + sz - 6);
-    ctx.closePath(); ctx.fill();
+    ctx.arc(MUTE_CX, MUTE_CY, MUTE_R, 0, Math.PI * 2);
+    ctx.fillStyle = muteHovered ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.3)';
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(MUTE_CX - 12, MUTE_CY - 4, 6, 8);
+    ctx.beginPath();
+    ctx.moveTo(MUTE_CX - 6, MUTE_CY - 4);
+    ctx.lineTo(MUTE_CX, MUTE_CY - 9);
+    ctx.lineTo(MUTE_CX, MUTE_CY + 9);
+    ctx.lineTo(MUTE_CX - 6, MUTE_CY + 4);
+    ctx.closePath();
+    ctx.fill();
     if (muted) {
-      ctx.strokeStyle = '#ff6666'; ctx.lineWidth = 2.5;
+      ctx.strokeStyle = '#ff6b6b'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(ix + 13, iy + 5); ctx.lineTo(ix + 20, iy + sz - 5);
-      ctx.moveTo(ix + 20, iy + 5); ctx.lineTo(ix + 13, iy + sz - 5);
+      ctx.moveTo(MUTE_CX + 3, MUTE_CY - 5); ctx.lineTo(MUTE_CX + 11, MUTE_CY + 5);
+      ctx.moveTo(MUTE_CX + 11, MUTE_CY - 5); ctx.lineTo(MUTE_CX + 3, MUTE_CY + 5);
       ctx.stroke();
     } else {
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(ix + 12, iy + sz / 2, 4, -Math.PI * 0.4, Math.PI * 0.4); ctx.stroke();
-      ctx.beginPath(); ctx.arc(ix + 12, iy + sz / 2, 8, -Math.PI * 0.4, Math.PI * 0.4); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(MUTE_CX + 2, MUTE_CY, 5, -Math.PI * 0.35, Math.PI * 0.35); ctx.stroke();
+      ctx.beginPath(); ctx.arc(MUTE_CX + 2, MUTE_CY, 10, -Math.PI * 0.35, Math.PI * 0.35); ctx.stroke();
+    }
+    if (muteHovered) {
+      const label = muted ? 'Unmute (M)' : 'Mute (M)';
+      ctx.font = '12px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(label).width + 14;
+      const ty = MUTE_CY + MUTE_R + 14;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.beginPath(); ctx.roundRect(MUTE_CX - tw / 2, ty - 11, tw, 22, 6); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.fillText(label, MUTE_CX, ty);
     }
     ctx.restore();
   }
 
   function isMuteIconClicked(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    const scaleX = W / rect.width;
-    const scaleY = H / rect.height;
-    const cx = (clientX - rect.left) * scaleX;
-    const cy = (clientY - rect.top) * scaleY;
-    return cx >= W - 50 && cx <= W - 5 && cy >= 5 && cy <= 45;
+    const x = (clientX - rect.left) * (W / rect.width);
+    const y = (clientY - rect.top) * (H / rect.height);
+    const dx = x - MUTE_CX, dy = y - MUTE_CY;
+    return dx * dx + dy * dy <= (MUTE_R + 4) * (MUTE_R + 4);
   }
 
   function renderPauseOverlay() {
@@ -566,7 +814,7 @@
     ctx.fillRect(0, 0, W, H);
 
     ctx.fillStyle = '#00CEC9';
-    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.font = 'bold 44px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.shadowColor = '#00CEC9';
     ctx.shadowBlur = 15;
@@ -574,7 +822,7 @@
     ctx.shadowBlur = 0;
 
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.font = '18px Arial, sans-serif';
+    ctx.font = '18px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillText('Press P to resume', W / 2, H * 0.46);
   }
 
@@ -584,7 +832,7 @@
     ctx.fillRect(0, 0, W, H);
 
     ctx.fillStyle = '#00CEC9';
-    ctx.font = 'bold 52px Arial, sans-serif';
+    ctx.font = 'bold 52px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.shadowColor = '#00CEC9';
     ctx.shadowBlur = 20;
@@ -594,43 +842,51 @@
     ctx.fillStyle = '#fff';
     const alpha = 0.5 + 0.5 * Math.sin(Date.now() / 500);
     ctx.globalAlpha = alpha;
-    ctx.font = '22px Arial, sans-serif';
+    ctx.font = '22px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillText('Tap to Play', W / 2, H * 0.45);
     ctx.globalAlpha = 1;
 
-    ctx.font = '15px Arial, sans-serif';
+    ctx.font = '15px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.fillText('Swipe or Arrow Keys to move', W / 2, H * 0.52);
+    ctx.fillText('Swipe or arrow keys to eat and grow!', W / 2, H * 0.52);
 
-    ctx.font = '13px Arial, sans-serif';
+    ctx.font = '13px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.fillText('P = Pause  |  M = Mute', W / 2, H * 0.565);
 
     if (bestScore > 0) {
       ctx.fillStyle = '#FDCB6E';
-      ctx.font = '18px Arial, sans-serif';
+      ctx.font = '18px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.fillText('Best: ' + bestScore, W / 2, H * 0.62);
     }
   }
 
   function renderGameOver() {
     render();
-    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+
+    const fade = gameOverFading || gameOverFade < 1 ? gameOverFade : 1;
+    ctx.fillStyle = 'rgba(0,0,0,' + (0.65 * fade) + ')';
     ctx.fillRect(0, 0, W, H);
 
+    ctx.globalAlpha = fade;
+
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.font = 'bold 44px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('Game Over', W / 2, H * 0.28);
-    ctx.font = 'bold 64px Arial, sans-serif';
+    ctx.font = 'bold 64px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillText(score, W / 2, H * 0.42);
-    ctx.font = '20px Arial, sans-serif';
+    ctx.font = '20px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = '#FDCB6E';
     ctx.fillText('Best: ' + bestScore, W / 2, H * 0.50);
 
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.font = '16px "Avenir Next", "Segoe UI", system-ui, sans-serif';
+    ctx.fillText('Length: ' + snake.length, W / 2, H * 0.545);
+
     if (score === bestScore && score > 0 && newBestTriggered) {
       ctx.fillStyle = '#FFD700';
-      ctx.font = 'bold 22px Arial, sans-serif';
+      ctx.font = 'bold 22px "Avenir Next", "Segoe UI", system-ui, sans-serif';
       ctx.shadowColor = '#FFD700';
       ctx.shadowBlur = 12;
       ctx.fillText('NEW BEST!', W / 2, H * 0.22);
@@ -640,8 +896,10 @@
     ctx.fillStyle = '#00CEC9';
     roundRect(W / 2 - 90, H * 0.57, 180, 50, 25);
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 20px Arial, sans-serif';
+    ctx.font = 'bold 20px "Avenir Next", "Segoe UI", system-ui, sans-serif';
     ctx.fillText('Play Again', W / 2, H * 0.57 + 32);
+
+    ctx.globalAlpha = 1;
   }
 
   function roundRect(x, y, w, h, r) {
@@ -668,6 +926,16 @@
     requestAnimationFrame(gameLoop);
   }
 
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (W / rect.width);
+    const y = (e.clientY - rect.top) * (H / rect.height);
+    const dx = x - MUTE_CX, dy = y - MUTE_CY;
+    muteHovered = dx * dx + dy * dy <= (MUTE_R + 4) * (MUTE_R + 4);
+    canvas.style.cursor = muteHovered ? 'pointer' : 'default';
+  });
+  canvas.addEventListener('mouseleave', () => { muteHovered = false; });
+
   let touchStart = null;
   canvas.addEventListener('touchstart', e => {
     e.preventDefault();
@@ -683,7 +951,7 @@
     if (!touchStart || state !== 'playing' || paused) return;
     const dx = e.changedTouches[0].clientX - touchStart.x;
     const dy = e.changedTouches[0].clientY - touchStart.y;
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_THRESHOLD) return;
     if (Math.abs(dx) > Math.abs(dy)) changeDir(dx > 0 ? 'right' : 'left');
     else changeDir(dy > 0 ? 'down' : 'up');
     touchStart = null;
@@ -699,7 +967,7 @@
     if (!touchStart || state !== 'playing' || paused) return;
     const dx = e.clientX - touchStart.x;
     const dy = e.clientY - touchStart.y;
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_THRESHOLD) return;
     if (Math.abs(dx) > Math.abs(dy)) changeDir(dx > 0 ? 'right' : 'left');
     else changeDir(dy > 0 ? 'down' : 'up');
     touchStart = null;

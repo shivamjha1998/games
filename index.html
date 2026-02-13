@@ -165,17 +165,6 @@
     color: #FDCB6E;
   }
 
-  .num {
-    position: absolute;
-    top: 10px;
-    left: 12px;
-    font-size: 0.65rem;
-    font-weight: 800;
-    color: rgba(255,255,255,0.5);
-    z-index: 2;
-    letter-spacing: 1px;
-  }
-
   .play-indicator {
     position: absolute;
     top: 50%;
@@ -358,10 +347,50 @@
   .t-runner .o1 { height: 30px; left: 130px; }
   .t-runner .o2 { height: 22px; left: 200px; }
 
+  /* Difficulty filter */
+  .filter-bar {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 18px;
+    flex-wrap: wrap;
+    position: relative;
+    z-index: 1;
+  }
+  .filter-btn {
+    font-family: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 6px 18px;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .filter-btn:hover { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.7); }
+  .filter-btn.active { background: rgba(102,126,234,0.25); color: #667eea; border-color: rgba(102,126,234,0.4); }
+
+  /* Completion indicator */
+  .trophy {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font-size: 1rem;
+    z-index: 2;
+    filter: drop-shadow(0 0 4px rgba(253,203,110,0.6));
+  }
+
   /* Responsive */
   @media (max-width: 600px) {
     .grid { padding: 20px 12px 50px; gap: 14px; }
     header { padding: 35px 16px 8px; }
+  }
+  @media (max-width: 360px) {
+    .grid { grid-template-columns: 1fr; padding: 16px 10px 40px; gap: 12px; }
   }
 </style>
 </head>
@@ -371,25 +400,31 @@
   <h1>GAME ARCADE</h1>
   <p>10 Hyper-Casual Games &mdash; Tap to Play</p>
   <div class="stats-bar" id="stats-bar"></div>
+  <div class="filter-bar" id="filter-bar">
+    <button class="filter-btn active" data-filter="all">All</button>
+    <button class="filter-btn" data-filter="easy">Easy</button>
+    <button class="filter-btn" data-filter="medium">Medium</button>
+    <button class="filter-btn" data-filter="hard">Hard</button>
+  </div>
 </header>
 <div class="grid" id="grid">
-  <a class="card" href="01-stack-tower.html" style="--glow: rgba(116,185,255,0.3)">
-    <div class="thumb t-stack"><span class="num">01</span><div class="play-indicator"></div><div class="b b1"></div><div class="b b2"></div><div class="b b3"></div><div class="b b4"></div></div>
+  <a class="card" href="01-stack-tower.html" data-difficulty="easy" style="--glow: rgba(116,185,255,0.3)">
+    <div class="thumb t-stack"><div class="play-indicator"></div><div class="b b1"></div><div class="b b2"></div><div class="b b3"></div><div class="b b4"></div></div>
     <div class="card-body"><h2>Stack Tower</h2><p>Tap to stack blocks perfectly. How high can you build?</p></div>
     <div class="card-meta"><span class="badge badge-easy">Easy</span><span class="best-score" data-key="stacktower_best"></span></div>
   </a>
-  <a class="card" href="02-color-switch.html" style="--glow: rgba(231,76,60,0.3)">
-    <div class="thumb t-color"><span class="num">02</span><div class="play-indicator"></div><div class="ring"></div><div class="dot"></div></div>
+  <a class="card" href="02-color-switch.html" data-difficulty="hard" style="--glow: rgba(231,76,60,0.3)">
+    <div class="thumb t-color"><div class="play-indicator"></div><div class="ring"></div><div class="dot"></div></div>
     <div class="card-body"><h2>Color Switch</h2><p>Match your color to pass through spinning obstacles.</p></div>
     <div class="card-meta"><span class="badge badge-hard">Hard</span><span class="best-score" data-key="colorswitch_best"></span></div>
   </a>
-  <a class="card" href="03-flappy-clone.html" style="--glow: rgba(253,203,110,0.3)">
-    <div class="thumb t-flappy"><span class="num">03</span><div class="play-indicator"></div><div class="pipe pt"></div><div class="pipe pb"></div><div class="bird"></div></div>
+  <a class="card" href="03-flappy-clone.html" data-difficulty="hard" style="--glow: rgba(253,203,110,0.3)">
+    <div class="thumb t-flappy"><div class="play-indicator"></div><div class="pipe pt"></div><div class="pipe pb"></div><div class="bird"></div></div>
     <div class="card-body"><h2>Flappy Clone</h2><p>Tap to flap through the gaps. Don't hit the pipes!</p></div>
     <div class="card-meta"><span class="badge badge-hard">Hard</span><span class="best-score" data-key="flappy_best"></span></div>
   </a>
-  <a class="card" href="04-zigzag-path.html" style="--glow: rgba(108,92,231,0.3)">
-    <div class="thumb t-zigzag"><span class="num">04</span><div class="play-indicator"></div>
+  <a class="card" href="04-zigzag-path.html" data-difficulty="medium" style="--glow: rgba(108,92,231,0.3)">
+    <div class="thumb t-zigzag"><div class="play-indicator"></div>
       <div class="path">
         <div class="tile" style="top:10px;left:20px"></div><div class="tile" style="top:22px;left:36px"></div>
         <div class="tile" style="top:34px;left:52px"></div><div class="tile" style="top:46px;left:36px"></div>
@@ -400,18 +435,18 @@
     <div class="card-body"><h2>Zigzag Path</h2><p>Tap to change direction. Stay on the path!</p></div>
     <div class="card-meta"><span class="badge badge-medium">Medium</span><span class="best-score" data-key="zigzag_best"></span></div>
   </a>
-  <a class="card" href="05-ball-bounce.html" style="--glow: rgba(253,121,168,0.3)">
-    <div class="thumb t-bounce"><span class="num">05</span><div class="play-indicator"></div><div class="plat p1"></div><div class="plat p2"></div><div class="plat p3"></div><div class="bll"></div></div>
+  <a class="card" href="05-ball-bounce.html" data-difficulty="medium" style="--glow: rgba(253,121,168,0.3)">
+    <div class="thumb t-bounce"><div class="play-indicator"></div><div class="plat p1"></div><div class="plat p2"></div><div class="plat p3"></div><div class="bll"></div></div>
     <div class="card-body"><h2>Ball Bounce</h2><p>Bounce upward through platforms. Don't fall!</p></div>
     <div class="card-meta"><span class="badge badge-medium">Medium</span><span class="best-score" data-key="ballbounce_best"></span></div>
   </a>
-  <a class="card" href="06-fruit-slice.html" style="--glow: rgba(231,76,60,0.3)">
-    <div class="thumb t-fruit"><span class="num">06</span><div class="play-indicator"></div><div class="fr f1"></div><div class="fr f2"></div><div class="fr f3"></div><div class="slash"></div></div>
+  <a class="card" href="06-fruit-slice.html" data-difficulty="easy" style="--glow: rgba(231,76,60,0.3)">
+    <div class="thumb t-fruit"><div class="play-indicator"></div><div class="fr f1"></div><div class="fr f2"></div><div class="fr f3"></div><div class="slash"></div></div>
     <div class="card-body"><h2>Fruit Slice</h2><p>Swipe to slice fruits. Watch out for bombs!</p></div>
     <div class="card-meta"><span class="badge badge-easy">Easy</span><span class="best-score" data-key="fruitslice_best"></span></div>
   </a>
-  <a class="card" href="07-2048-puzzle.html" style="--glow: rgba(237,194,46,0.3)">
-    <div class="thumb t-2048"><span class="num">07</span><div class="play-indicator"></div>
+  <a class="card" href="07-2048-puzzle.html" data-difficulty="medium" style="--glow: rgba(237,194,46,0.3)">
+    <div class="thumb t-2048"><div class="play-indicator"></div>
       <div class="mg">
         <div class="tl" style="background:#EDE0C8;color:#776E65">4</div>
         <div class="tl" style="background:#F2B179;color:#fff">8</div>
@@ -422,18 +457,18 @@
     <div class="card-body"><h2>2048 Puzzle</h2><p>Slide and merge tiles to reach 2048.</p></div>
     <div class="card-meta"><span class="badge badge-medium">Medium</span><span class="best-score" data-key="2048_best"></span></div>
   </a>
-  <a class="card" href="08-tap-speed.html" style="--glow: rgba(231,76,60,0.3)">
-    <div class="thumb t-tap"><span class="num">08</span><div class="play-indicator"></div><div class="btn">👆</div></div>
+  <a class="card" href="08-tap-speed.html" data-difficulty="easy" style="--glow: rgba(231,76,60,0.3)">
+    <div class="thumb t-tap"><div class="play-indicator"></div><div class="btn">👆</div></div>
     <div class="card-body"><h2>Tap Speed</h2><p>How fast can you tap? Test your speed!</p></div>
     <div class="card-meta"><span class="badge badge-easy">Easy</span><span class="best-score" data-key="tapspeed_best"></span></div>
   </a>
-  <a class="card" href="09-snake-game.html" style="--glow: rgba(0,206,201,0.3)">
-    <div class="thumb t-snake"><span class="num">09</span><div class="play-indicator"></div><div class="seg s1"></div><div class="seg s2"></div><div class="seg s3"></div><div class="seg s4"></div><div class="seg s5"></div><div class="food"></div></div>
+  <a class="card" href="09-snake-game.html" data-difficulty="medium" style="--glow: rgba(0,206,201,0.3)">
+    <div class="thumb t-snake"><div class="play-indicator"></div><div class="seg s1"></div><div class="seg s2"></div><div class="seg s3"></div><div class="seg s4"></div><div class="seg s5"></div><div class="food"></div></div>
     <div class="card-body"><h2>Snake</h2><p>Classic snake with a modern twist. Eat and grow!</p></div>
     <div class="card-meta"><span class="badge badge-medium">Medium</span><span class="best-score" data-key="snake_best"></span></div>
   </a>
-  <a class="card" href="10-endless-runner.html" style="--glow: rgba(108,92,231,0.3)">
-    <div class="thumb t-runner"><span class="num">10</span><div class="play-indicator"></div><div class="ground"></div><div class="char"></div><div class="obs o1"></div><div class="obs o2"></div></div>
+  <a class="card" href="10-endless-runner.html" data-difficulty="medium" style="--glow: rgba(108,92,231,0.3)">
+    <div class="thumb t-runner"><div class="play-indicator"></div><div class="ground"></div><div class="char"></div><div class="obs o1"></div><div class="obs o2"></div></div>
     <div class="card-body"><h2>Endless Runner</h2><p>Run, jump, and dodge obstacles. How far can you go?</p></div>
     <div class="card-meta"><span class="badge badge-medium">Medium</span><span class="best-score" data-key="runner_best"></span></div>
   </a>
@@ -503,19 +538,57 @@
   }
   drawBg();
 
-  // Scroll-triggered card animations
+  // Track last played game
+  const grid = document.getElementById('grid');
   const cards = document.querySelectorAll('.card');
+
+  cards.forEach(card => {
+    card.addEventListener('click', () => {
+      const href = card.getAttribute('href');
+      localStorage.setItem('lastPlayed', href);
+    });
+  });
+
+  // Recently played sorting - move last played to top
+  const lastPlayed = localStorage.getItem('lastPlayed');
+  if (lastPlayed) {
+    const lastCard = grid.querySelector(`a[href="${lastPlayed}"]`);
+    if (lastCard) {
+      grid.insertBefore(lastCard, grid.firstElementChild);
+    }
+  }
+
+  // Scroll-triggered card animations
+  const allCards = document.querySelectorAll('.card');
   const observer = new IntersectionObserver((entries) => {
-    entries.forEach((entry, idx) => {
+    entries.forEach((entry) => {
       if (entry.isIntersecting) {
         const card = entry.target;
-        const index = Array.from(cards).indexOf(card);
+        const index = Array.from(allCards).indexOf(card);
         setTimeout(() => card.classList.add('visible'), index * 80);
         observer.unobserve(card);
       }
     });
   }, { threshold: 0.1 });
-  cards.forEach(card => observer.observe(card));
+  allCards.forEach(card => observer.observe(card));
+
+  // Difficulty filter
+  const filterBtns = document.querySelectorAll('.filter-btn');
+  filterBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      filterBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const filter = btn.dataset.filter;
+      allCards.forEach(card => {
+        if (filter === 'all' || card.dataset.difficulty === filter) {
+          card.style.display = '';
+          card.classList.add('visible');
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    });
+  });
 
   // Load best scores from localStorage
   const scoreKeys = {
@@ -531,6 +604,20 @@
     runner_best: 'Endless Runner'
   };
 
+  // Completion thresholds per game
+  const trophyThresholds = {
+    stacktower_best: 20,
+    colorswitch_best: 15,
+    flappy_best: 20,
+    zigzag_best: 30,
+    ballbounce_best: 200,
+    fruitslice_best: 100,
+    '2048_best': 5000,
+    tapspeed_best: 80,
+    snake_best: 15,
+    runner_best: 200
+  };
+
   let totalGames = 0;
   let gamesPlayed = 0;
   document.querySelectorAll('.best-score').forEach(el => {
@@ -540,6 +627,16 @@
     if (val && parseInt(val) > 0) {
       el.innerHTML = 'Best: <span>' + val + '</span>';
       gamesPlayed++;
+
+      // Add trophy if above threshold
+      const threshold = trophyThresholds[key];
+      if (threshold && parseInt(val) >= threshold) {
+        const card = el.closest('.card');
+        const trophy = document.createElement('span');
+        trophy.className = 'trophy';
+        trophy.textContent = '\u{1F3C6}';
+        card.querySelector('.thumb').appendChild(trophy);
+      }
     }
   });
 
